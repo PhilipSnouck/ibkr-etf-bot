@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 
-from broker import connect_ib, get_account_cash, qualify_etf_contracts, get_etf_prices
+from broker import (
+    connect_ib,
+    get_account_cash,
+    qualify_etf_contracts,
+    get_etf_prices,
+    is_contract_open_now,
+)
 from allocator import allocate_three_etf_portfolio
 from pending_topup import (
     load_pending_topup,
@@ -26,6 +32,7 @@ account_currency = account_settings["currency"]
 etf_config = account_settings["etfs"]
 
 print(f"Running bot for account: {TARGET_ACCOUNT_NAME}")
+print(f"Execution mode: {EXECUTION_MODE}")
 
 # ------------------------------------------------------------
 # CHECK FOR A PENDING TOP-UP FIRST
@@ -65,10 +72,26 @@ if pending and pending["account_name"] == TARGET_ACCOUNT_NAME:
         shortfall = required_cash_now - real_cash
 
         print(f"\nCurrent {pending_symbol} price: {account_currency} {current_price:.2f}")
-        print(f"Cash needed now for {pending['target_shares']} shares: {account_currency} {required_cash_now:.2f}")
+        print(f"Total needed for {pending_symbol}: {account_currency} {required_cash_now:.2f}")
+        print(f"Current cash: {account_currency} {real_cash:.2f}")
 
         if shortfall <= 0:
             print("\nPending top-up is now fully funded.")
+
+            contract = qualified_contracts[pending_symbol]
+            market_open, market_reason = is_contract_open_now(ib, contract)
+
+            print(f"\nMarket check for {pending_symbol}: {'OPEN' if market_open else 'CLOSED'}")
+            print(market_reason)
+
+            if not market_open:
+                print("Action taken: no order placed.")
+                print("Reason: market is currently closed.")
+                print("Next step: rerun the script during market hours.")
+                print("Pending top-up file has been kept.")
+                ib.disconnect()
+                raise SystemExit
+
             print("Would buy:")
             print(f"{pending_symbol}: {pending['target_shares']} shares ({account_currency} {required_cash_now:.2f})")
 
@@ -78,9 +101,10 @@ if pending and pending["account_name"] == TARGET_ACCOUNT_NAME:
                 print("Pending top-up file has been deleted.")
             else:
                 print("\nLive execution not implemented yet.")
+                print("Market safeguard passed, but execution code is not added yet.")
         else:
             print("\nPending top-up is still NOT fully funded.")
-            print(f"Additional cash still needed: {account_currency} {shortfall:.2f}")
+            print(f"Still missing: {account_currency} {shortfall:.2f}")
 
         ib.disconnect()
         raise SystemExit
@@ -167,6 +191,34 @@ print("\nAchieved allocation of invested amount:")
 print(f"{symbol_1}: {actual_pct[symbol_1]:.2f}%")
 print(f"{symbol_2}: {actual_pct[symbol_2]:.2f}%")
 print(f"{symbol_3}: {actual_pct[symbol_3]:.2f}%")
+
+# ------------------------------------------------------------
+# CHECK MARKET HOURS FOR PLANNED BUYS
+# ------------------------------------------------------------
+planned_symbols = [symbol for symbol in symbols if shares[symbol] > 0]
+
+if planned_symbols:
+    print("\n--- MARKET HOURS CHECK ---")
+    closed_symbols = []
+
+    for symbol in planned_symbols:
+        contract = qualified_contracts[symbol]
+        market_open, market_reason = is_contract_open_now(ib, contract)
+
+        print(f"{symbol}: {'OPEN' if market_open else 'CLOSED'}")
+        print(f"  {market_reason}")
+
+        if not market_open:
+            closed_symbols.append(symbol)
+
+    if EXECUTION_MODE == "live" and closed_symbols:
+        print("\nLive execution would be blocked.")
+        print("Reason: one or more ETFs are currently outside market hours.")
+        print("Action taken: no orders would be placed.")
+        print(f"Blocked ETFs: {', '.join(closed_symbols)}")
+
+        ib.disconnect()
+        raise SystemExit
 
 # ------------------------------------------------------------
 # CREATE A PENDING TOP-UP IF ETF3 HIT THE X.75+ RULE
