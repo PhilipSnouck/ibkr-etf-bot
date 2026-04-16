@@ -30,10 +30,16 @@ def get_account_cash(ib, account_id, currency="EUR"):
 # ------------------------------------------------------------
 # QUALIFY ETF CONTRACTS FROM CONFIG
 # ------------------------------------------------------------
-def qualify_etf_contracts(ib, etf_config):
+# If symbols is None, qualify all ETFs in the config.
+# If symbols is a list, qualify only those symbols.
+def qualify_etf_contracts(ib, etf_config, symbols=None):
     qualified = {}
 
-    for symbol, settings in etf_config.items():
+    if symbols is None:
+        symbols = list(etf_config.keys())
+
+    for symbol in symbols:
+        settings = etf_config[symbol]
         contract = Stock(symbol, settings["exchange"], settings["currency"])
         result = ib.qualifyContracts(contract)
 
@@ -41,8 +47,6 @@ def qualify_etf_contracts(ib, etf_config):
             qualified[symbol] = result[0]
 
     return qualified
-
-
 # ------------------------------------------------------------
 # FETCH ETF PRICES
 # ------------------------------------------------------------

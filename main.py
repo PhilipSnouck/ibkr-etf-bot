@@ -73,8 +73,9 @@ if pending and pending["account_name"] == TARGET_ACCOUNT_NAME:
             print(f"{pending_symbol}: {pending['target_shares']} shares ({account_currency} {required_cash_now:.2f})")
 
             if EXECUTION_MODE == "dry_run":
-                print("\nDry-run mode only: no real order placed.")
-                print("Pending file is being kept until live execution is implemented.")
+                print("\nDry-run mode: simulating successful EGLN follow-up.")
+                clear_pending_topup()
+                print("Pending top-up file has been deleted.")
             else:
                 print("\nLive execution not implemented yet.")
         else:
