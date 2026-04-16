@@ -1,5 +1,11 @@
+# ------------------------------------------------------------
+# IMPORTS
+# ------------------------------------------------------------
+
+# Standard library
 from datetime import datetime, timezone
 
+# Internal modules
 from broker import (
     connect_ib,
     get_account_cash,
@@ -15,6 +21,8 @@ from pending_topup import (
     is_pending_topup_expired,
     pending_topup_age_days,
 )
+
+# Configuration
 from config import (
     ACCOUNTS,
     TARGET_ACCOUNT_NAME,

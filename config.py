@@ -3,7 +3,7 @@
 # ------------------------------------------------------------
 # Set to None to use real IBKR cash.
 # Set to a number like 2100 to simulate a normal month.
-TEST_CASH_OVERRIDE = 2180
+TEST_CASH_OVERRIDE = 2100
 
 # ------------------------------------------------------------
 # EXECUTION MODE
@@ -15,8 +15,23 @@ EXECUTION_MODE = "dry_run"
 # ------------------------------------------------------------
 # IBKR CONNECTION SETTINGS
 # ------------------------------------------------------------
+# Settings used to connect to IBKR via IB Gateway or TWS.
+# Usually no need to change these unless your setup differs.
+
+# IP address of IB Gateway / TWS
+# "127.0.0.1" = running on this computer
 IB_HOST = "127.0.0.1"
+
+# API port (depends on your setup)
+# Common defaults:
+# - 4001 → IB Gateway (live)
+# - 4002 → IB Gateway (paper)
+# - 7496 → TWS (live)
+# - 7497 → TWS (paper)
 IB_PORT = 4001
+
+# Unique ID for this connection
+# Use different IDs if running multiple bots
 IB_CLIENT_ID = 1
 
 # ------------------------------------------------------------
@@ -35,6 +50,8 @@ MAX_PENDING_TOPUP_AGE_DAYS = 7
 # ------------------------------------------------------------
 # ACCOUNT DEFINITIONS
 # ------------------------------------------------------------
+
+
 ACCOUNTS = {
     "Pension": {
         "account_id": "U16859527",
