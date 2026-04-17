@@ -1,8 +1,11 @@
+# ------------------------------------------------------------
+# IMPORTS
+# ------------------------------------------------------------
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from ib_async import IB, Stock
-from config import IB_HOST, IB_PORT, IB_CLIENT_ID
+from ib_async import IB, Stock, MarketOrder
+from config import IB_CONNECTIONS, IB_ENVIRONMENT
 
 
 # ------------------------------------------------------------
@@ -10,7 +13,14 @@ from config import IB_HOST, IB_PORT, IB_CLIENT_ID
 # ------------------------------------------------------------
 def connect_ib():
     ib = IB()
-    ib.connect(IB_HOST, IB_PORT, clientId=IB_CLIENT_ID)
+
+    connection = IB_CONNECTIONS[IB_ENVIRONMENT]
+
+    ib.connect(
+        connection["host"],
+        connection["port"],
+        clientId=connection["client_id"],
+    )
 
     # Use delayed data if live market data is unavailable
     ib.reqMarketDataType(3)
@@ -34,8 +44,6 @@ def get_account_cash(ib, account_id, currency="EUR"):
 # ------------------------------------------------------------
 # QUALIFY ETF CONTRACTS FROM CONFIG
 # ------------------------------------------------------------
-# If symbols is None, qualify all ETFs in the config.
-# If symbols is a list, qualify only those symbols.
 def qualify_etf_contracts(ib, etf_config, symbols=None):
     qualified = {}
 
@@ -60,8 +68,42 @@ def get_etf_prices(ib, qualified_contracts):
     tickers = ib.reqTickers(*qualified_contracts.values())
 
     prices = {}
+    invalid_symbols = []
+
     for t in tickers:
-        prices[t.contract.symbol] = float(t.marketPrice())
+        symbol = t.contract.symbol
+
+        candidates = [
+            t.marketPrice(),
+            t.last,
+            t.close,
+        ]
+
+        valid_price = None
+        for candidate in candidates:
+            if candidate is None:
+                continue
+
+            try:
+                candidate = float(candidate)
+            except (TypeError, ValueError):
+                continue
+
+            if candidate <= 0:
+                continue
+
+            valid_price = candidate
+            break
+
+        if valid_price is None:
+            invalid_symbols.append(symbol)
+        else:
+            prices[symbol] = valid_price
+
+    if invalid_symbols:
+        raise ValueError(
+            f"No valid positive price received for: {', '.join(invalid_symbols)}"
+        )
 
     return prices
 
@@ -79,10 +121,7 @@ def get_contract_details(ib, contract):
 
 
 # ------------------------------------------------------------
-# PARSE A SINGLE IBKR DATETIME TOKEN
-# Supports:
-# - HHMM
-# - YYYYMMDD:HHMM
+# PARSE IBKR HOURS
 # ------------------------------------------------------------
 def parse_ibkr_datetime_token(token, default_date_str, tz):
     token = token.strip()
@@ -95,13 +134,6 @@ def parse_ibkr_datetime_token(token, default_date_str, tz):
     return dt.replace(tzinfo=tz)
 
 
-# ------------------------------------------------------------
-# PARSE IBKR HOURS STRING
-# Examples:
-#   20260416:0900-1730;20260417:CLOSED
-#   20260416:0900-1200,1300-1730
-#   20260416:0900-20260416:1750
-# ------------------------------------------------------------
 def parse_ibkr_hours(hours_str, tz_name):
     if not hours_str:
         return []
@@ -130,8 +162,6 @@ def parse_ibkr_hours(hours_str, tz_name):
                 continue
 
             start_token, end_token = session.split("-", 1)
-            start_token = start_token.strip()
-            end_token = end_token.strip()
 
             try:
                 start_dt = parse_ibkr_datetime_token(start_token, date_str, tz)
@@ -139,7 +169,6 @@ def parse_ibkr_hours(hours_str, tz_name):
             except ValueError:
                 continue
 
-            # Handle overnight sessions if end is earlier than start
             if end_dt < start_dt:
                 end_dt += timedelta(days=1)
 
@@ -150,7 +179,6 @@ def parse_ibkr_hours(hours_str, tz_name):
 
 # ------------------------------------------------------------
 # CHECK IF CONTRACT IS OPEN NOW
-# Uses IBKR liquidHours for execution safety
 # ------------------------------------------------------------
 def is_contract_open_now(ib, contract):
     details = get_contract_details(ib, contract)
@@ -161,37 +189,44 @@ def is_contract_open_now(ib, contract):
     tz_name = details.timeZoneId
     liquid_hours = details.liquidHours
 
-    if not tz_name:
-        return False, "No timeZoneId returned from IBKR."
-
-    if not liquid_hours:
-        return False, "No liquidHours returned from IBKR."
-
     now_local = datetime.now(ZoneInfo(tz_name))
     windows = parse_ibkr_hours(liquid_hours, tz_name)
 
-    if not windows:
-        return False, f"Could not parse liquidHours returned by IBKR for timezone {tz_name}."
-
     for start_dt, end_dt in windows:
         if start_dt <= now_local <= end_dt:
-            return True, (
-                f"Market is open now in {tz_name}. "
-                f"Current session: {start_dt.strftime('%Y-%m-%d %H:%M')} "
-                f"to {end_dt.strftime('%Y-%m-%d %H:%M')}."
-            )
+            return True, f"Market is open now."
 
-    next_window = None
-    for start_dt, end_dt in windows:
-        if now_local < start_dt:
-            next_window = (start_dt, end_dt)
-            break
+    return False, f"Market is closed now."
 
-    if next_window:
-        return False, (
-            f"Market is closed now in {tz_name}. "
-            f"Next session: {next_window[0].strftime('%Y-%m-%d %H:%M')} "
-            f"to {next_window[1].strftime('%Y-%m-%d %H:%M')}."
-        )
 
-    return False, f"Market is closed now in {tz_name}."
+# ------------------------------------------------------------
+# PLACE MARKET ORDER
+# ------------------------------------------------------------
+def place_market_order(ib, contract, quantity, account_id):
+    if quantity <= 0:
+        raise ValueError("Quantity must be greater than 0.")
+
+    order = MarketOrder("BUY", quantity)
+    order.account = account_id
+
+    trade = ib.placeOrder(contract, order)
+    return trade
+
+
+# ------------------------------------------------------------
+# WAIT FOR ORDER STATUS
+# ------------------------------------------------------------
+def wait_for_order_status(ib, trade, timeout_seconds=15):
+    start = datetime.now()
+
+    while True:
+        status = trade.orderStatus.status
+
+        if status in {"Filled", "Cancelled", "ApiCancelled", "Inactive"}:
+            return status
+
+        elapsed = (datetime.now() - start).total_seconds()
+        if elapsed >= timeout_seconds:
+            return status
+
+        ib.sleep(1)
