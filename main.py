@@ -1,12 +1,28 @@
 # ------------------------------------------------------------
-# IMPORTS
+# MAIN ORCHESTRATOR
+# ------------------------------------------------------------
+# This script runs the ETF bot across all enabled accounts in
+# one go.
+#
+# Responsibilities:
+# - connect to IBKR
+# - iterate through enabled accounts from config.py
+# - handle pending top-up logic per account
+# - fetch cash, contracts, and prices
+# - run the configured allocator for each account
+# - print order previews
+# - check market hours
+# - optionally execute approved orders
+#
+# Important design split:
+# - allocator = what to buy
+# - rules      = whether an account is eligible to proceed
+# - main       = orchestration and execution flow
 # ------------------------------------------------------------
 
-# Standard library
 import sys
 from datetime import datetime, timezone
 
-# Internal modules
 from broker import (
     connect_ib,
     get_account_cash,
@@ -16,7 +32,9 @@ from broker import (
     place_market_order,
     wait_for_order_status,
 )
-from allocator import allocate_three_etf_portfolio
+
+from allocator_registry import get_allocator
+
 from pending_topup import (
     load_pending_topup,
     save_pending_topup,
@@ -25,353 +43,488 @@ from pending_topup import (
     pending_topup_age_days,
 )
 
-# Configuration
+from rules import (
+    is_account_enabled,
+    get_allocator_name,
+    get_account_currency,
+    get_account_id,
+    passes_min_cash_rule,
+    pending_topup_enabled,
+    get_topup_trigger,
+)
+
 from config import (
     ACCOUNTS,
-    TARGET_ACCOUNT_NAME,
     TEST_CASH_OVERRIDE,
-    ETF3_TOPUP_TRIGGER,
     EXECUTION_MODE,
     IB_ENVIRONMENT,
 )
 
 
 # ------------------------------------------------------------
-# LOAD ACCOUNT SETTINGS FROM CONFIG
-# ------------------------------------------------------------
-account_settings = ACCOUNTS[TARGET_ACCOUNT_NAME]
-account_id = account_settings["account_ids"][IB_ENVIRONMENT]
-account_currency = account_settings["currency"]
-etf_config = account_settings["etfs"]
-
-
-# ------------------------------------------------------------
 # RUNTIME MODE
 # ------------------------------------------------------------
-# Usage:
-# - python main.py      -> preview only
-# - python main.py buy  -> preview + execute (if enabled)
 BUY_CONFIRMED = len(sys.argv) > 1 and sys.argv[1].lower() == "buy"
 
-print(f"Running bot for account: {TARGET_ACCOUNT_NAME}")
-print(f"Environment: {IB_ENVIRONMENT}")
-print(f"Execution mode: {EXECUTION_MODE}")
-print(f"Buy confirmed: {BUY_CONFIRMED}")
-
+print("\n--- RUN CONFIG --------------------------------------------------")
+print(
+    f"{'Env':<6}: {IB_ENVIRONMENT:<6} | "
+    f"{'Mode':<6}: {EXECUTION_MODE:<7} | "
+    f"{'Buy':<6}: {str(BUY_CONFIRMED):<5}"
+)
+print("---------------------------------------------------------------")
 
 # ------------------------------------------------------------
-# CHECK FOR A PENDING TOP-UP FIRST
+# COLOR CONSTANTS
 # ------------------------------------------------------------
-# If a pending top-up exists and is still valid, we do NOT
-# recalculate ETF1 and ETF2. We only check whether ETF3 can
-# now be completed.
-pending = load_pending_topup()
+GREEN = "\033[92m"
+RESET = "\033[0m"
 
-if pending and pending["account_name"] == TARGET_ACCOUNT_NAME:
-    if is_pending_topup_expired(pending):
-        print("\nPending top-up found, but it has expired.")
-        print("Deleting expired pending item and continuing with a normal run.")
-        clear_pending_topup()
-    else:
-        print("\nPending top-up found.")
-        print(f"Pending symbol: {pending['symbol']}")
-        print(f"Target shares: {pending['target_shares']}")
-        print(f"Pending age: {pending_topup_age_days(pending):.2f} days")
+# ------------------------------------------------------------
+# LIVE SAFETY GUARD
+# ------------------------------------------------------------
+if IB_ENVIRONMENT == "live" and TEST_CASH_OVERRIDE is not None:
+    raise RuntimeError(
+        "Safety stop: TEST_CASH_OVERRIDE must be None in live mode."
+    )
 
-        print("\nConnecting to IBKR...")
-        ib = connect_ib()
-        print("Connected!")
+# ------------------------------------------------------------
+# CONNECT TO IBKR ONCE
+# ------------------------------------------------------------
+ib = connect_ib()
+print(f"{'IB':<6}: connected")
 
-        # For pending follow-up, always use REAL cash.
-        # We do not use the test override here.
-        real_cash = get_account_cash(ib, account_id, currency=account_currency)
-        print(f"\n{TARGET_ACCOUNT_NAME} real cash: {account_currency} {real_cash:.2f}")
+execution_queue = []
 
-        pending_symbol = pending["symbol"]
-        qualified_contracts = qualify_etf_contracts(ib, etf_config, symbols=[pending_symbol])
-        prices = get_etf_prices(ib, qualified_contracts)
+# ------------------------------------------------------------
+# PROCESS EACH ENABLED ACCOUNT
+# ------------------------------------------------------------
+for account_name, account_settings in ACCOUNTS.items():
+    if not is_account_enabled(account_settings):
+        continue
 
-        current_price = prices[pending_symbol]
-        required_cash_now = pending["target_shares"] * current_price
-        shortfall = required_cash_now - real_cash
+    print(f"\n{GREEN}============================================================")
+    print(f"ACCOUNT: {account_name}")
+    print(f"============================================================{RESET}")
 
-        print(f"\nCurrent {pending_symbol} price: {account_currency} {current_price:.2f}")
-        print(f"Total needed for {pending_symbol}: {account_currency} {required_cash_now:.2f}")
-        print(f"Current cash: {account_currency} {real_cash:.2f}")
+    account_id = get_account_id(account_settings, IB_ENVIRONMENT)
 
-        if shortfall <= 0:
-            print("\nPending top-up is now fully funded.")
+    if not account_id:
+        print(f"Skipping account: no {IB_ENVIRONMENT} account ID configured.")
+        continue
 
-            contract = qualified_contracts[pending_symbol]
-            market_open, market_reason = is_contract_open_now(ib, contract)
+    account_currency = get_account_currency(account_settings)
+    allocator_name = get_allocator_name(account_settings)
+    allocator = get_allocator(allocator_name)
+    etf_config = account_settings["etfs"]
 
-            print(f"\nMarket check for {pending_symbol}: {'OPEN' if market_open else 'CLOSED'}")
-            print(market_reason)
+    # --------------------------------------------------------
+    # CHECK FOR ACCOUNT-SPECIFIC PENDING TOP-UP
+    # --------------------------------------------------------
+    if pending_topup_enabled(account_settings):
+        pending = load_pending_topup(account_name)
 
-            if not market_open:
-                print("Action taken: no order placed.")
-                print("Reason: market is currently closed.")
-                print("Next step: rerun the script during market hours.")
-                print("Pending top-up file has been kept.")
-                ib.disconnect()
-                raise SystemExit
-
-            print("\nWould buy:")
-            print(f"{pending_symbol}: {pending['target_shares']} shares ({account_currency} {required_cash_now:.2f})")
-
-            if EXECUTION_MODE != "execute":
-                print("\nPreview only: EXECUTION_MODE is not 'execute'. No orders will be placed.")
-            elif not BUY_CONFIRMED:
-                print("\nPreview only: no 'buy' command given. No order will be placed.")
+        if pending:
+            if is_pending_topup_expired(pending):
+                print("\nPending top-up found, but it has expired.")
+                print("Deleting expired pending item and continuing with a normal run.")
+                clear_pending_topup(account_name)
             else:
-                print("\nBuy command detected and execute mode enabled.")
-                print(f"Submitting market order for {pending_symbol}...")
+                print("\nPending top-up found.")
 
-                trade = place_market_order(
-                    ib=ib,
-                    contract=contract,
-                    quantity=pending["target_shares"],
-                    account_id=account_id,
+                real_cash = get_account_cash(ib, account_id, currency=account_currency)
+
+                pending_symbol = pending["symbol"]
+                qualified_contracts = qualify_etf_contracts(
+                    ib,
+                    etf_config,
+                    symbols=[pending_symbol],
+                )
+                prices = get_etf_prices(ib, qualified_contracts)
+
+                contract = qualified_contracts[pending_symbol]
+                market_open, market_reason = is_contract_open_now(ib, contract)
+
+                current_price = prices[pending_symbol]
+                required_cash_now = pending["target_shares"] * current_price
+                shortfall = required_cash_now - real_cash
+                pending_age = pending_topup_age_days(pending)
+
+                print("\n--- PENDING TOP-UP STATUS ---\n")
+
+                header = (
+                    f"{'ETF':5} | {'Target Shrs':>11} | {'Price':>10} | "
+                    f"{'Cash Now':>10} | {'Need Total':>11} | {'Shortfall':>10} | "
+                    f"{'Market':>8} | {'Age(d)':>7}"
+                )
+                print(header)
+                print("-" * len(header))
+
+                print(
+                    f"{pending_symbol:5} | "
+                    f"{pending['target_shares']:11} | "
+                    f"{current_price:10.2f} | "
+                    f"{real_cash:10.2f} | "
+                    f"{required_cash_now:11.2f} | "
+                    f"{max(shortfall, 0):10.2f} | "
+                    f"{('OPEN' if market_open else 'CLOSED'):>8} | "
+                    f"{pending_age:7.2f}"
                 )
 
-                status = wait_for_order_status(ib, trade)
+                print("\nStatus note:")
+                print(market_reason)
 
-                print(f"{pending_symbol} order status: {status}")
-                print(f"{pending_symbol} filled: {trade.orderStatus.filled}")
-                print(f"{pending_symbol} remaining: {trade.orderStatus.remaining}")
+                if shortfall <= 0:
+                    print("\nPending top-up is now fully funded.")
 
-                if trade.orderStatus.avgFillPrice:
+                    if not market_open:
+                        print("Action taken: no order placed.")
+                        print("Reason: market is currently closed.")
+                        print("Next step: rerun the script during market hours.")
+                        print("Pending top-up file has been kept.")
+                        continue
+
+                    print("\nOrder ready:")
                     print(
-                        f"{pending_symbol} avg fill price: "
-                        f"{account_currency} {trade.orderStatus.avgFillPrice:.2f}"
+                        f"{pending_symbol}: {pending['target_shares']} shares "
+                        f"({account_currency} {required_cash_now:.2f})"
                     )
 
-                if status in {"Filled", "Submitted", "PreSubmitted", "PendingSubmit"}:
-                    clear_pending_topup()
-                    print("Pending top-up file cleared.")
+                    if EXECUTION_MODE != "execute":
+                        print("\nPreview only: EXECUTION_MODE is not 'execute'. No order will be placed.")
+                    elif not BUY_CONFIRMED:
+                        print("\nPreview only: no 'buy' command given. No order will be placed.")
+                    else:
+                        execution_queue.append(
+                            {
+                                "account_name": account_name,
+                                "account_id": account_id,
+                                "account_currency": account_currency,
+                                "orders": [
+                                    {
+                                        "symbol": pending_symbol,
+                                        "contract": contract,
+                                        "quantity": pending["target_shares"],
+                                    }
+                                ],
+                                "pending_followup": {
+                                    "type": "clear_pending_topup",
+                                },
+                            }
+                        )
                 else:
-                    print("Pending top-up file kept because order did not complete cleanly.")
-        else:
-            print("\nPending top-up is still NOT fully funded.")
-            print(f"Still missing: {account_currency} {shortfall:.2f}")
+                    print("\nPending top-up is still NOT fully funded.")
+                    print(f"Still missing: {account_currency} {shortfall:.2f}")
 
-        ib.disconnect()
-        raise SystemExit
+                continue
 
+    # --------------------------------------------------------
+    # GET CASH
+    # --------------------------------------------------------
+    real_cash = get_account_cash(ib, account_id, currency=account_currency)
 
-# ------------------------------------------------------------
-# CONNECT TO IBKR
-# ------------------------------------------------------------
-print("\nConnecting to IBKR...")
-ib = connect_ib()
-print("Connected!")
+    if TEST_CASH_OVERRIDE is not None:
+        cash = float(TEST_CASH_OVERRIDE)
+        print(f"\n{account_name} real cash: {account_currency} {real_cash:.2f}")
+        print(f"{account_name} test cash override: {account_currency} {cash:.2f}")
+    else:
+        cash = real_cash
+        print(f"\n{account_name} cash: {account_currency} {cash:.2f}")
 
+    # --------------------------------------------------------
+    # ACCOUNT-LEVEL CASH RULES
+    # --------------------------------------------------------
+    # Important:
+    # We still continue with qualification, pricing, allocation,
+    # and preview output even if the account is below the minimum
+    # cash threshold.
+    #
+    # The min-cash rule is treated as an execution gate, not as
+    # a data/preview gate.
+    passes_cash_rule, min_cash_required = passes_min_cash_rule(account_settings, cash)
 
-# ------------------------------------------------------------
-# GET CASH
-# ------------------------------------------------------------
-real_cash = get_account_cash(ib, account_id, currency=account_currency)
+    # --------------------------------------------------------
+    # QUALIFY ETF CONTRACTS
+    # --------------------------------------------------------
+    qualified_contracts = qualify_etf_contracts(ib, etf_config)
 
-if TEST_CASH_OVERRIDE is not None:
-    cash = float(TEST_CASH_OVERRIDE)
-    print(f"\n{TARGET_ACCOUNT_NAME} real cash: {account_currency} {real_cash:.2f}")
-    print(f"{TARGET_ACCOUNT_NAME} test cash override: {account_currency} {cash:.2f}")
-else:
-    cash = real_cash
-    print(f"\n{TARGET_ACCOUNT_NAME} cash: {account_currency} {cash:.2f}")
+    # --------------------------------------------------------
+    # FETCH ETF PRICES
+    # --------------------------------------------------------
+    try:
+        prices = get_etf_prices(ib, qualified_contracts)
+    except ValueError as e:
+        print(f"\nSafety stop while fetching prices: {e}")
+        continue
 
+    invalid_price_found = False
 
-# ------------------------------------------------------------
-# QUALIFY ETF CONTRACTS
-# ------------------------------------------------------------
-print("\nQualifying ETF contracts...")
-qualified_contracts = qualify_etf_contracts(ib, etf_config)
+    for symbol, price in prices.items():
+        if price <= 0:
+            print(f"\nSafety stop: invalid price for {symbol}: {price}")
+            invalid_price_found = True
 
-for symbol in qualified_contracts:
-    print(f"{symbol}: OK")
+    if invalid_price_found:
+        continue
 
+    # --------------------------------------------------------
+    # RUN ALLOCATOR
+    # --------------------------------------------------------
+    topup_trigger = get_topup_trigger(account_settings)
 
-# ------------------------------------------------------------
-# FETCH ETF PRICES
-# ------------------------------------------------------------
-print("\nFetching ETF prices...")
+    result = allocator(
+        cash=cash,
+        etf_config=etf_config,
+        prices=prices,
+        topup_trigger=topup_trigger,
+    )
 
-try:
-    prices = get_etf_prices(ib, qualified_contracts)
-except ValueError as e:
-    print(f"\nSafety stop while fetching prices: {e}")
-    ib.disconnect()
-    raise SystemExit
+    symbols = result["symbols"]
+    shares = result["shares"]
+    spent = result["spent"]
+    raw = result["raw"]
+    diagnostics = result.get("diagnostics", {})
+    topup = result["topup"]
+    totals = result["totals"]
+    actual_pct = result["actual_pct"]
 
-for symbol, price in prices.items():
-    if price <= 0:
-        print(f"\nSafety stop: invalid price for {symbol}: {price}")
-        ib.disconnect()
-        raise SystemExit
+    # --------------------------------------------------------
+    # CHECK MARKET HOURS
+    # --------------------------------------------------------
+    market_status = {}
+    market_blocked = False
 
-    print(f"{symbol}: {account_currency} {price:.2f}")
-
-
-# ------------------------------------------------------------
-# RUN ALLOCATION
-# ------------------------------------------------------------
-result = allocate_three_etf_portfolio(
-    cash=cash,
-    etf_config=etf_config,
-    prices=prices,
-    etf3_topup_trigger=ETF3_TOPUP_TRIGGER,
-)
-
-symbols = result["symbols"]
-symbol_1, symbol_2, symbol_3 = symbols
-
-shares = result["shares"]
-spent = result["spent"]
-raw = result["raw"]
-diagnostics = result["diagnostics"]
-topup = result["topup"]
-totals = result["totals"]
-actual_pct = result["actual_pct"]
-
-print("\n--- ORDER PREVIEW ---")
-print(f"{symbol_1} target: {etf_config[symbol_1]['target_weight']*100:.0f}%")
-print(f"{symbol_2} target: {etf_config[symbol_2]['target_weight']*100:.0f}%")
-print(f"{symbol_3} target: {etf_config[symbol_3]['target_weight']*100:.0f}%")
-
-print("\nRounding diagnostics:")
-print(f"{symbol_1} raw shares: {raw[symbol_1]:.4f}")
-print(f"{symbol_1} chosen shares: {shares[symbol_1]}")
-print(f"{symbol_1} rounded down: {diagnostics[f'{symbol_1.lower()}_rounded_down']}")
-
-print(f"{symbol_2} raw shares: {raw[symbol_2]:.4f}")
-print(f"{symbol_2} chosen shares: {shares[symbol_2]}")
-
-print(f"{symbol_3} raw shares from remainder: {raw[symbol_3]:.4f}")
-print(f"{symbol_3} fractional part: {diagnostics[f'{symbol_3.lower()}_fractional_part']:.4f}")
-
-print("\nWould buy:")
-print(f"{symbol_1}: {shares[symbol_1]} shares ({account_currency} {spent[symbol_1]:.2f})")
-print(f"{symbol_2}: {shares[symbol_2]} shares ({account_currency} {spent[symbol_2]:.2f})")
-print(f"{symbol_3}: {shares[symbol_3]} shares ({account_currency} {spent[symbol_3]:.2f})")
-
-print(f"\nTotal spent: {account_currency} {totals['total_spent']:.2f}")
-print(f"Leftover cash: {account_currency} {totals['leftover_cash']:.2f}")
-print(f"Planned spend check vs available cash: {account_currency} {cash:.2f}")
-
-if totals["total_spent"] > cash:
-    print("\nSafety stop: planned spend exceeds available cash.")
-    ib.disconnect()
-    raise SystemExit
-
-print("\nAchieved allocation of invested amount:")
-print(f"{symbol_1}: {actual_pct[symbol_1]:.2f}%")
-print(f"{symbol_2}: {actual_pct[symbol_2]:.2f}%")
-print(f"{symbol_3}: {actual_pct[symbol_3]:.2f}%")
-
-
-# ------------------------------------------------------------
-# CHECK MARKET HOURS FOR PLANNED BUYS
-# ------------------------------------------------------------
-planned_symbols = [symbol for symbol in symbols if shares[symbol] > 0]
-
-if planned_symbols:
-    print("\n--- MARKET HOURS CHECK ---")
-    closed_symbols = []
-
-    for symbol in planned_symbols:
+    for symbol in symbols:
         contract = qualified_contracts[symbol]
         market_open, market_reason = is_contract_open_now(ib, contract)
 
-        print(f"{symbol}: {'OPEN' if market_open else 'CLOSED'}")
-        print(f"  {market_reason}")
+        market_status[symbol] = {
+            "open": market_open,
+            "reason": market_reason,
+        }
 
-        if not market_open:
-            closed_symbols.append(symbol)
+        if shares[symbol] > 0 and not market_open:
+            market_blocked = True
 
-    if BUY_CONFIRMED and EXECUTION_MODE == "execute" and closed_symbols:
-        print("\nBuy request blocked.")
+    # --------------------------------------------------------
+    # PREVIEW
+    # --------------------------------------------------------
+    print("\n--- MARKET / INSTRUMENT STATUS ---\n")
+
+    header_1 = f"{'ETF':5} | {'Qualified':>9} | {'Price':>10} | {'Market':>8} | {'Status note':<20}"
+    print(header_1)
+    print("-" * len(header_1))
+
+    for symbol in symbols:
+        qualified = "yes" if symbol in qualified_contracts else "no"
+        price = prices.get(symbol, 0.0)
+        market_open = "OPEN" if market_status[symbol]["open"] else "CLOSED"
+        status_note = market_status[symbol]["reason"]
+
+        print(
+            f"{symbol:5} | "
+            f"{qualified:>9} | "
+            f"{price:10.2f} | "
+            f"{market_open:>8} | "
+            f"{status_note:<20}"
+        )
+
+    print("\n--- ORDER PREVIEW ---\n")
+
+    header_2 = f"{'ETF':5} | {'Target%':>7} | {'Raw':>9} | {'Chosen':>6} | {'Spent':>10} | {'Note':<15}"
+    print(header_2)
+    print("-" * len(header_2))
+
+    for idx, symbol in enumerate(symbols):
+        target_pct = etf_config[symbol]["target_weight"] * 100
+        raw_val = raw[symbol]
+        chosen = shares[symbol]
+        spent_val = spent[symbol]
+
+        note = "normal"
+
+        if topup["needed"] and symbol == topup["symbol"]:
+            note = "top-up pending"
+        elif len(symbols) == 3 and idx == 0:
+            rounded_down = diagnostics.get(f"{symbol.lower()}_rounded_down", False)
+            note = "rounded down" if rounded_down else "normal"
+
+        print(
+            f"{symbol:5} | "
+            f"{target_pct:7.1f}% | "
+            f"{raw_val:9.4f} | "
+            f"{chosen:6} | "
+            f"{spent_val:10.2f} | "
+            f"{note:<15}"
+        )
+
+    print("-" * len(header_2))
+
+    # --------------------------------------------------------
+    # SUMMARY (HORIZONTAL)
+    # --------------------------------------------------------
+    summary_parts = []
+
+    for symbol in symbols:
+        summary_parts.append(f"{symbol}: {actual_pct[symbol]:.2f}%")
+
+    summary_parts.append(f"TOTAL: {totals['total_spent']:.2f} {account_currency}")
+    summary_parts.append(f"LEFT: {totals['leftover_cash']:.2f} {account_currency}")
+
+    print("\nSUMMARY | " + " | ".join(summary_parts))
+    print("Top-up triggered:", "YES" if topup["needed"] else "NO")
+
+    if not passes_cash_rule:
+        print("\nAccount blocked for execution.")
+        print(
+            f"Reason: available cash is below minimum threshold "
+            f"({account_currency} {min_cash_required:.2f})."
+        )
+
+    if market_blocked:
+        print("\nAccount blocked for execution.")
         print("Reason: one or more ETFs are currently outside market hours.")
-        print("Action taken: no orders placed.")
-        print(f"Blocked ETFs: {', '.join(closed_symbols)}")
 
-        ib.disconnect()
-        raise SystemExit
-
-
-# ------------------------------------------------------------
-# FINAL EXECUTION DECISION
-# ------------------------------------------------------------
-if EXECUTION_MODE != "execute":
-    print("\nPreview only: EXECUTION_MODE is not 'execute'. No orders will be placed.")
-elif not BUY_CONFIRMED:
-    print("\nPreview only: no 'buy' command given. No orders will be placed.")
-else:
-    print("\nBuy command detected and execute mode enabled.")
-    print("Submitting market orders...")
-
-    execution_plan = []
+    # --------------------------------------------------------
+    # BUILD EXECUTION PLAN
+    # --------------------------------------------------------
+    orders = []
 
     for symbol in symbols:
         if shares[symbol] <= 0:
             continue
 
-        # If ETF3 triggered top-up logic, do not buy it now
-        if symbol == topup["symbol"] and topup["needed"]:
-            continue
+        orders.append(
+            {
+                "symbol": symbol,
+                "contract": qualified_contracts[symbol],
+                "quantity": shares[symbol],
+            }
+        )
 
-        execution_plan.append(symbol)
+    pending_followup = None
 
-    if not execution_plan:
-        print("No orders to place.")
-    else:
-        for symbol in execution_plan:
-            contract = qualified_contracts[symbol]
-            quantity = shares[symbol]
+    if passes_cash_rule and topup["needed"] and pending_topup_enabled(account_settings):
+        pending_cash_reference = topup.get(
+            "remaining_cash_before_order",
+            topup.get("remaining_cash_before_etf3", cash),
+        )
 
-            print(f"\nPlacing BUY order for {symbol}: {quantity} shares")
+        pending_data = {
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "account_name": account_name,
+            "account_id": account_id,
+            "symbol": topup["symbol"],
+            "target_shares": topup["target_shares"],
+            "remaining_cash_before_order": pending_cash_reference,
+            "topup_amount_at_creation": topup["topup_amount"],
+            "status": "waiting_for_topup",
+        }
+
+        save_pending_topup(account_name, pending_data)
+
+        print("\n--- PENDING TOP-UP CREATED ---")
+        print(f"{topup['symbol']} was NOT bought.")
+        print(
+            f"Remaining cash before {topup['symbol']}: "
+            f"{account_currency} {pending_cash_reference:.2f}"
+        )
+        print(
+            f"Top up needed to reach {topup['target_shares']} shares: "
+            f"{account_currency} {topup['topup_amount']:.2f}"
+        )
+        print("A pending top-up file has been saved.")
+
+    if (
+        orders
+        and passes_cash_rule
+        and not market_blocked
+        and EXECUTION_MODE == "execute"
+        and BUY_CONFIRMED
+    ):
+        execution_queue.append(
+            {
+                "account_name": account_name,
+                "account_id": account_id,
+                "account_currency": account_currency,
+                "orders": orders,
+                "pending_followup": pending_followup,
+            }
+        )
+    elif orders:
+        if EXECUTION_MODE != "execute":
+            print("\nPreview only: EXECUTION_MODE is not 'execute'. No orders will be placed.")
+        elif not BUY_CONFIRMED:
+            print("\nPreview only: no 'buy' command given. No orders will be placed.")
+
+# ------------------------------------------------------------
+# EXECUTION PHASE
+# ------------------------------------------------------------
+print("\n============================================================")
+print("EXECUTION PHASE")
+print("============================================================")
+
+if not execution_queue:
+    print("No approved orders to place.")
+else:
+    for plan in execution_queue:
+        print("\n------------------------------------------------------------")
+        print(f"Executing account: {plan['account_name']}")
+        print("------------------------------------------------------------")
+
+        for order in plan["orders"]:
+            symbol = order["symbol"]
+            contract = order["contract"]
+            quantity = order["quantity"]
 
             trade = place_market_order(
                 ib=ib,
                 contract=contract,
                 quantity=quantity,
-                account_id=account_id,
+                account_id=plan["account_id"],
             )
 
-            status = wait_for_order_status(ib, trade)
+            order["trade"] = trade
+            order["final_status"] = wait_for_order_status(ib, trade)
 
-            print(f"{symbol} order status: {status}")
-            print(f"{symbol} filled: {trade.orderStatus.filled}")
-            print(f"{symbol} remaining: {trade.orderStatus.remaining}")
+        # --------------------------------------------------------
+        # EXECUTION SUMMARY TABLE
+        # --------------------------------------------------------
+        print("\n--- EXECUTION SUMMARY ---\n")
 
-            if trade.orderStatus.avgFillPrice:
-                print(
-                    f"{symbol} avg fill price: "
-                    f"{account_currency} {trade.orderStatus.avgFillPrice:.2f}"
-                )
+        header = f"{'ETF':5} | {'Shares':>6} | {'Avg Price':>10} | {'Total':>10}"
+        print(header)
+        print("-" * len(header))
+
+        total_spent = 0.0
+
+        for order in plan["orders"]:
+            symbol = order["symbol"]
+            trade = order["trade"]
+
+            filled = trade.orderStatus.filled
+            avg_price = trade.orderStatus.avgFillPrice
+            total = filled * avg_price
+
+            total_spent += total
+
+            print(
+                f"{symbol:5} | "
+                f"{filled:6.0f} | "
+                f"{avg_price:10.2f} | "
+                f"{total:10.2f}"
+            )
+
+        print("-" * len(header))
+        print(f"{'TOTAL':5} | {'':6} | {'':10} | {total_spent:10.2f}")
+
+        if plan["pending_followup"] and plan["pending_followup"]["type"] == "clear_pending_topup":
+            clear_pending_topup(plan["account_name"])
+            print("Pending top-up file cleared.")
 
 
 # ------------------------------------------------------------
-# CREATE A PENDING TOP-UP IF ETF3 HIT THE X.75+ RULE
+# CLEAN SHUTDOWN
 # ------------------------------------------------------------
-if topup["needed"]:
-    pending_data = {
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "account_name": TARGET_ACCOUNT_NAME,
-        "account_id": account_id,
-        "symbol": topup["symbol"],
-        "target_shares": topup["target_shares"],
-        "remaining_cash_before_etf3": topup["remaining_cash_before_etf3"],
-        "topup_amount_at_creation": topup["topup_amount"],
-        "status": "waiting_for_topup",
-    }
-
-    save_pending_topup(pending_data)
-
-    print("\n--- PENDING TOP-UP CREATED ---")
-    print(f"{topup['symbol']} was NOT bought.")
-    print(f"Remaining cash before {topup['symbol']}: {account_currency} {topup['remaining_cash_before_etf3']:.2f}")
-    print(f"Top up needed to reach {topup['target_shares']} shares: {account_currency} {topup['topup_amount']:.2f}")
-    print("A pending top-up file has been saved.")
-    print("When you rerun the script later, it will only check this pending ETF.")
-
 ib.disconnect()
+print("\nDisconnected from IBKR.")

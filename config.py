@@ -3,7 +3,7 @@
 # ------------------------------------------------------------
 # Set to None to use real IBKR cash.
 # Set to a number like 2100 to simulate a normal month.
-TEST_CASH_OVERRIDE = 2100
+TEST_CASH_OVERRIDE = 2180
 
 # ------------------------------------------------------------
 # ENVIRONMENT SWITCH
@@ -22,9 +22,6 @@ EXECUTION_MODE = "execute"  # "preview" or "execute"
 # ------------------------------------------------------------
 # IBKR CONNECTION SETTINGS
 # ------------------------------------------------------------
-# Settings used to connect to IBKR via IB Gateway or TWS.
-# Usually no need to change these unless your setup differs.
-
 IB_CONNECTIONS = {
     "paper": {
         "host": "127.0.0.1",
@@ -41,26 +38,28 @@ IB_CONNECTIONS = {
 # ------------------------------------------------------------
 # PENDING TOP-UP SETTINGS
 # ------------------------------------------------------------
-# If ETF3 reaches x.75 shares or higher, we skip ETF3 and
-# ask for a top-up instead.
-ETF3_TOPUP_TRIGGER = 0.75
-
-# Pending top-up file name
-PENDING_TOPUP_FILE = "pending_topup.json"
-
-# Expire pending top-up items after 7 days
+# Each account gets its own pending file.
+PENDING_TOPUP_FILE_TEMPLATE = "pending_topup_{account_key}.json"
 MAX_PENDING_TOPUP_AGE_DAYS = 7
 
 # ------------------------------------------------------------
 # ACCOUNT DEFINITIONS
 # ------------------------------------------------------------
+# All adjustable account behavior lives here.
 ACCOUNTS = {
     "Pension": {
+        "enabled": True,
         "account_ids": {
             "paper": "DUQ244285",
             "live": "U16859527",
         },
         "currency": "EUR",
+        "allocator": "pension",
+        "rules": {
+            "min_cash_to_execute": 0,
+            "pending_topup_enabled": True,
+            "topup_trigger": 0.75,
+        },
         "etfs": {
             "VUAA": {
                 "exchange": "BVME.ETF",
@@ -81,10 +80,41 @@ ACCOUNTS = {
                 "rounding": "floor_remainder",
             },
         },
-    }
+    },
+    "Samen investeren": {
+        "enabled": True,
+        "account_ids": {
+            "paper": None,
+            "live": "U24635357",
+        },
+        "currency": "EUR",
+        "allocator": "joint",
+        "rules": {
+            "min_cash_to_execute": 300,
+            "pending_topup_enabled": True,
+            "topup_trigger": 0.75,
+        },
+        "etfs": {
+            "IWDA": {
+                "exchange": "AEB",
+                "currency": "EUR",
+                "target_weight": 1.00,
+                "name": "ISHARES CORE MSCI WORLD",
+            },
+        },
+    },
+    "Otto": {
+        "enabled": False,
+        "account_ids": {
+            "paper": "",
+            "live": "",
+        },
+        "currency": "EUR",
+        "allocator": "otto",
+        "rules": {
+            "min_cash_to_execute": 300,
+            "pending_topup_enabled": False,
+        },
+        "etfs": {},
+    },
 }
-
-# ------------------------------------------------------------
-# WHICH ACCOUNT TO RUN
-# ------------------------------------------------------------
-TARGET_ACCOUNT_NAME = "Pension"

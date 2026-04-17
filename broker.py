@@ -2,6 +2,7 @@
 # IMPORTS
 # ------------------------------------------------------------
 from datetime import datetime, timedelta
+from math import isfinite
 from zoneinfo import ZoneInfo
 
 from ib_async import IB, Stock, MarketOrder
@@ -87,6 +88,12 @@ def get_etf_prices(ib, qualified_contracts):
             try:
                 candidate = float(candidate)
             except (TypeError, ValueError):
+                continue
+
+            if not isfinite(candidate):
+                continue
+
+            if candidate <= 0:
                 continue
 
             if candidate <= 0:
@@ -208,6 +215,7 @@ def place_market_order(ib, contract, quantity, account_id):
 
     order = MarketOrder("BUY", quantity)
     order.account = account_id
+    order.tif = "DAY"
 
     trade = ib.placeOrder(contract, order)
     return trade
