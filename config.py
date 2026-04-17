@@ -106,15 +106,23 @@ ACCOUNTS = {
     "Otto": {
         "enabled": False,
         "account_ids": {
-            "paper": "",
-            "live": "",
+            "paper": None,
+            "live": None,
         },
         "currency": "EUR",
         "allocator": "otto",
         "rules": {
             "min_cash_to_execute": 300,
-            "pending_topup_enabled": False,
+            "pending_topup_enabled": True,
+            "topup_trigger": 0.75,
         },
-        "etfs": {},
+        "etfs": {
+            "IWDA": {
+                "exchange": "AEB",
+                "currency": "EUR",
+                "target_weight": 1.00,
+                "name": "ISHARES CORE MSCI WORLD",
+            },
+        },
     },
 }

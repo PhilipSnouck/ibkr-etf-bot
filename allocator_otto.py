@@ -1,21 +1,102 @@
+from math import floor, ceil
+
+
 # ------------------------------------------------------------
-# OTTO ACCOUNT ALLOCATOR (PLACEHOLDER)
+# OTTO ACCOUNT ALLOCATOR
 # ------------------------------------------------------------
-# This allocator will later contain the logic for the Otto account.
+# Purpose:
+# This allocator calculates how to allocate cash for the Otto
+# account, which currently consists of a single ETF.
 #
-# Planned behavior (to be defined):
-# - account-specific allocation logic
-# - execution only if minimum cash rule is met
+# Rules:
+# - 100% of available cash is allocated to the ETF
+# - if the raw share count has a fractional part below the
+#   top-up trigger, we round down and buy that number of shares
+# - if the fractional part is at or above the top-up trigger,
+#   we buy 0 shares for now and create a pending top-up instead
 #
-# Important:
-# - the minimum cash threshold itself belongs in config.py
-# - this allocator should only calculate what to buy
-# - main.py + rules.py decide whether buying is allowed
+# Expected inputs:
+# - cash (float): available cash to allocate
+# - etf_config (dict): ETF settings from config.py
+# - prices (dict): symbol -> price mapping
+# - topup_trigger (float): fractional threshold (e.g. 0.75)
 #
-# For now:
-# - this is a placeholder to complete the architecture
-# - it raises an error if accidentally used
+# Output format:
+# Matches the shared allocator contract used by main.py
 # ------------------------------------------------------------
 
-def allocate_otto_portfolio(cash, etf_config, prices, **kwargs):
-    raise NotImplementedError("Otto allocator is not implemented yet.")
+def allocate_otto_portfolio(cash, etf_config, prices, topup_trigger=0.75):
+    symbols = list(etf_config.keys())
+
+    if len(symbols) != 1:
+        raise ValueError("Otto allocator expects exactly 1 ETF.")
+
+    symbol = symbols[0]
+    settings = etf_config[symbol]
+    price = prices[symbol]
+
+    target_budget = cash * settings["target_weight"]
+
+    raw_shares = target_budget / price
+    floor_shares = floor(raw_shares)
+    ceil_shares = ceil(raw_shares)
+    fractional_part = raw_shares - floor_shares
+
+    topup_needed = False
+    topup_amount = 0.0
+    target_shares = floor_shares
+
+    # --------------------------------------------------------
+    # TOP-UP DECISION
+    # --------------------------------------------------------
+    if fractional_part >= topup_trigger and raw_shares > 0:
+        topup_needed = True
+        target_shares = ceil_shares
+        chosen_shares = 0
+        spent = 0.0
+        topup_amount = (target_shares * price) - cash
+    else:
+        chosen_shares = floor_shares
+        spent = chosen_shares * price
+
+        while chosen_shares > 0 and spent > cash:
+            chosen_shares -= 1
+            spent = chosen_shares * price
+
+    # --------------------------------------------------------
+    # FINAL TOTALS
+    # --------------------------------------------------------
+    leftover_cash = cash - spent
+    total_spent = spent
+
+    actual_pct = 100.0 if total_spent > 0 else 0.0
+
+    return {
+        "symbols": [symbol],
+        "shares": {
+            symbol: chosen_shares,
+        },
+        "spent": {
+            symbol: spent,
+        },
+        "raw": {
+            symbol: raw_shares,
+        },
+        "diagnostics": {
+            f"{symbol.lower()}_fractional_part": fractional_part,
+        },
+        "topup": {
+            "needed": topup_needed,
+            "symbol": symbol,
+            "target_shares": target_shares,
+            "topup_amount": topup_amount,
+            "remaining_cash_before_etf3": cash,
+        },
+        "totals": {
+            "total_spent": total_spent,
+            "leftover_cash": leftover_cash,
+        },
+        "actual_pct": {
+            symbol: actual_pct,
+        },
+    }
