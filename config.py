@@ -3,14 +3,14 @@
 # ------------------------------------------------------------
 # Set to None to use real IBKR cash.
 # Set to a number like 2100 to simulate a normal month.
-TEST_CASH_OVERRIDE = 2180
+TEST_CASH_OVERRIDE = None
 
 # ------------------------------------------------------------
 # ENVIRONMENT SWITCH
 # ------------------------------------------------------------
 # Main environment toggle for the whole bot.
 # Change only this value when switching between paper and live.
-IB_ENVIRONMENT = "paper"  # "paper" or "live"
+IB_ENVIRONMENT = "live"  # "paper" or "live"
 
 # ------------------------------------------------------------
 # EXECUTION MODE
@@ -90,7 +90,7 @@ ACCOUNTS = {
         "currency": "EUR",
         "allocator": "joint",
         "rules": {
-            "min_cash_to_execute": 300,
+            "min_cash_to_execute": 100,
             "pending_topup_enabled": True,
             "topup_trigger": 0.75,
         },

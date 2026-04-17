@@ -229,9 +229,12 @@ def print_summary(symbols, actual_pct, totals, account_currency, passes_cash_rul
 # EXECUTION HELPER
 # ------------------------------------------------------------
 def execute_plan(ib, execution_queue):
-    print("\n============================================================")
+    BLUE = "\033[94m"
+    RESET = "\033[0m"
+
+    print(f"\n{BLUE}============================================================")
     print("EXECUTION PHASE")
-    print("============================================================")
+    print(f"============================================================{RESET}")
 
     if not execution_queue:
         print("No approved orders to place.")
