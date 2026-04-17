@@ -410,20 +410,7 @@ for account_name, account_settings in ACCOUNTS.items():
             topup.get("remaining_cash_before_etf3", cash),
         )
 
-        pending_data = {
-            "created_at_utc": datetime.now(timezone.utc).isoformat(),
-            "account_name": account_name,
-            "account_id": account_id,
-            "symbol": topup["symbol"],
-            "target_shares": topup["target_shares"],
-            "remaining_cash_before_order": pending_cash_reference,
-            "topup_amount_at_creation": topup["topup_amount"],
-            "status": "waiting_for_topup",
-        }
-
-        save_pending_topup(account_name, pending_data)
-
-        print("\n--- PENDING TOP-UP CREATED ---")
+        print("\n--- PENDING TOP-UP REQUIRED ---")
         print(f"{topup['symbol']} was NOT bought.")
         print(
             f"Remaining cash before {topup['symbol']}: "
@@ -433,7 +420,23 @@ for account_name, account_settings in ACCOUNTS.items():
             f"Top up needed to reach {topup['target_shares']} shares: "
             f"{account_currency} {topup['topup_amount']:.2f}"
         )
-        print("A pending top-up file has been saved.")
+
+        if EXECUTION_MODE == "execute" and BUY_CONFIRMED:
+            pending_data = {
+                "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                "account_name": account_name,
+                "account_id": account_id,
+                "symbol": topup["symbol"],
+                "target_shares": topup["target_shares"],
+                "remaining_cash_before_order": pending_cash_reference,
+                "topup_amount_at_creation": topup["topup_amount"],
+                "status": "waiting_for_topup",
+            }
+
+            save_pending_topup(account_name, pending_data)
+            print("A pending top-up file has been saved.")
+        else:
+            print("Preview only: pending top-up file was NOT saved.")
 
     if (
         orders
