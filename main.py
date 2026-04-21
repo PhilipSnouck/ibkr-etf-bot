@@ -159,8 +159,11 @@ for account_name, account_settings in ACCOUNTS.items():
     invalid_price_found = False
 
     for symbol, price in prices.items():
-        if price <= 0:
-            print(f"\nSafety stop: invalid price for {symbol}: {price}")
+        if price is None or price <= 0:
+            print(
+                f"\nSafety stop: no valid market price available for {symbol} "
+                f"(tried delayed streaming and delayed frozen)."
+            )
             invalid_price_found = True
 
     if invalid_price_found:

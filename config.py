@@ -2,15 +2,15 @@
 # GLOBAL SETTINGS
 # ------------------------------------------------------------
 # Set to None to use real IBKR cash.
-# Set to a number like 2100 to simulate a normal month.
-TEST_CASH_OVERRIDE = None
+# Set to a number like 2100 to simulate a normal month. Only works in paper mode
+TEST_CASH_OVERRIDE = 2100
 
 # ------------------------------------------------------------
 # ENVIRONMENT SWITCH
 # ------------------------------------------------------------
 # Main environment toggle for the whole bot.
 # Change only this value when switching between paper and live.
-IB_ENVIRONMENT = "live"  # "paper" or "live"
+IB_ENVIRONMENT = "paper"  # "paper" or "live"
 
 # ------------------------------------------------------------
 # EXECUTION MODE

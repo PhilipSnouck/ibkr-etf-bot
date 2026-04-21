@@ -65,55 +65,130 @@ def qualify_etf_contracts(ib, etf_config, symbols=None):
 # ------------------------------------------------------------
 # FETCH ETF PRICES
 # ------------------------------------------------------------
-def get_etf_prices(ib, qualified_contracts):
-    tickers = ib.reqTickers(*qualified_contracts.values())
+def get_ticker_price(ticker):
+    """
+    Extract the best usable price from an IBKR ticker object.
 
+    Preference order:
+    1. marketPrice()
+    2. last
+    3. midpoint of bid/ask
+
+    Returns float or None.
+    """
+    candidates = []
+
+    try:
+        mp = ticker.marketPrice()
+        if mp is not None and isfinite(mp) and mp > 0:
+            candidates.append(mp)
+    except Exception:
+        pass
+
+    try:
+        if ticker.last is not None and isfinite(ticker.last) and ticker.last > 0:
+            candidates.append(ticker.last)
+    except Exception:
+        pass
+
+    try:
+        if (
+            ticker.bid is not None and isfinite(ticker.bid) and ticker.bid > 0 and
+            ticker.ask is not None and isfinite(ticker.ask) and ticker.ask > 0
+        ):
+            candidates.append((ticker.bid + ticker.ask) / 2)
+    except Exception:
+        pass
+
+    return candidates[0] if candidates else None
+
+
+def _normalize_contracts(contracts):
+    if isinstance(contracts, dict):
+        return list(contracts.values())
+    return list(contracts)
+
+
+def _safe_cancel_market_data(ib, tickers):
+    for ticker in tickers:
+        try:
+            contract = getattr(ticker, "contract", None)
+            if contract is not None:
+                ib.cancelMktData(contract)
+        except Exception:
+            pass
+
+
+def _request_prices_once(ib, contract_list, wait_seconds=2.0):
+    """
+    Request delayed streaming prices once.
+    Returns {symbol: price_or_None}.
+    """
     prices = {}
-    invalid_symbols = []
 
-    for t in tickers:
-        symbol = t.contract.symbol
+    ib.reqMarketDataType(3)
+    tickers = [ib.reqMktData(contract, "", False, False) for contract in contract_list]
+    ib.sleep(wait_seconds)
 
-        candidates = [
-            t.marketPrice(),
-            t.last,
-            t.close,
-        ]
+    for contract, ticker in zip(contract_list, tickers):
+        prices[contract.symbol] = get_ticker_price(ticker)
 
-        valid_price = None
-        for candidate in candidates:
-            if candidate is None:
-                continue
+    _safe_cancel_market_data(ib, tickers)
+    return prices
 
-            try:
-                candidate = float(candidate)
-            except (TypeError, ValueError):
-                continue
 
-            if not isfinite(candidate):
-                continue
+def get_etf_prices(ib, contracts, is_paper=True):
+    """
+    Fetch ETF prices using a simple robust strategy:
 
-            if candidate <= 0:
-                continue
+    1. Warm-up pass using delayed streaming data
+    2. Real pass using delayed streaming data
 
-            if candidate <= 0:
-                continue
+    No delayed frozen fallback.
+    No historical fallback.
 
-            valid_price = candidate
-            break
+    Returns {symbol: price_or_None}
+    """
+    contract_list = _normalize_contracts(contracts)
 
-        if valid_price is None:
-            invalid_symbols.append(symbol)
-        else:
-            prices[symbol] = valid_price
+    # Warm-up pass
+    _ = _request_prices_once(ib, contract_list, wait_seconds=1.5)
+    ib.sleep(0.5)
 
-    if invalid_symbols:
-        raise ValueError(
-            f"No valid positive price received for: {', '.join(invalid_symbols)}"
-        )
+    # Real pass
+    prices = _request_prices_once(ib, contract_list, wait_seconds=2.0)
 
     return prices
 
+    # --------------------------------------------------------
+    # WARM-UP PASS
+    # --------------------------------------------------------
+    # Purpose:
+    # IBKR sometimes fails the first delayed market data request
+    # for a contract, while the immediate next request succeeds.
+    # This pass intentionally "primes" the session.
+    _ = _request_prices_once(ib, contract_list, market_data_type=3, wait_seconds=1.5)
+    ib.sleep(0.5)
+
+    # --------------------------------------------------------
+    # PASS 1: delayed streaming
+    # --------------------------------------------------------
+    prices = _request_prices_once(ib, contract_list, market_data_type=3, wait_seconds=2.0)
+
+    missing_contracts = [c for c in contract_list if prices.get(c.symbol) is None]
+    if not missing_contracts:
+        return prices
+
+    # --------------------------------------------------------
+    # PASS 2: delayed frozen, only for missing symbols
+    # --------------------------------------------------------
+    frozen_prices = _request_prices_once(ib, missing_contracts, market_data_type=4, wait_seconds=2.0)
+
+    for symbol, price in frozen_prices.items():
+        if price is not None:
+            prices[symbol] = price
+
+    return prices
 
 # ------------------------------------------------------------
 # GET CONTRACT DETAILS
