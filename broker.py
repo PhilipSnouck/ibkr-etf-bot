@@ -137,7 +137,7 @@ def _request_prices_once(ib, contract_list, wait_seconds=2.0):
     return prices
 
 
-def get_etf_prices(ib, contracts, is_paper=True):
+def get_etf_prices(ib, contracts):
     """
     Fetch ETF prices using a simple robust strategy:
 
@@ -157,36 +157,6 @@ def get_etf_prices(ib, contracts, is_paper=True):
 
     # Real pass
     prices = _request_prices_once(ib, contract_list, wait_seconds=2.0)
-
-    return prices
-
-    # --------------------------------------------------------
-    # WARM-UP PASS
-    # --------------------------------------------------------
-    # Purpose:
-    # IBKR sometimes fails the first delayed market data request
-    # for a contract, while the immediate next request succeeds.
-    # This pass intentionally "primes" the session.
-    _ = _request_prices_once(ib, contract_list, market_data_type=3, wait_seconds=1.5)
-    ib.sleep(0.5)
-
-    # --------------------------------------------------------
-    # PASS 1: delayed streaming
-    # --------------------------------------------------------
-    prices = _request_prices_once(ib, contract_list, market_data_type=3, wait_seconds=2.0)
-
-    missing_contracts = [c for c in contract_list if prices.get(c.symbol) is None]
-    if not missing_contracts:
-        return prices
-
-    # --------------------------------------------------------
-    # PASS 2: delayed frozen, only for missing symbols
-    # --------------------------------------------------------
-    frozen_prices = _request_prices_once(ib, missing_contracts, market_data_type=4, wait_seconds=2.0)
-
-    for symbol, price in frozen_prices.items():
-        if price is not None:
-            prices[symbol] = price
 
     return prices
 

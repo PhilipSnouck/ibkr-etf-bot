@@ -70,7 +70,16 @@ def process_pending_topup(
     contract = qualified_contracts[pending_symbol]
     market_open, market_reason = is_contract_open_now(ib, contract)
 
-    current_price = prices[pending_symbol]
+    current_price = prices.get(pending_symbol)
+
+    if current_price is None or current_price <= 0:
+        print(
+            f"\nSafety stop: no valid market price available for pending ETF "
+            f"{pending_symbol} (after delayed streaming retry)."
+        )
+        print("Pending top-up file has been kept.")
+        return True
+
     required_cash_now = pending["target_shares"] * current_price
     shortfall = required_cash_now - real_cash
     pending_age = pending_topup_age_days(pending)

@@ -1,16 +1,9 @@
 # ------------------------------------------------------------
-# GLOBAL SETTINGS
-# ------------------------------------------------------------
-# Set to None to use real IBKR cash.
-# Set to a number like 2100 to simulate a normal month. Only works in paper mode
-TEST_CASH_OVERRIDE = 2100
-
-# ------------------------------------------------------------
 # ENVIRONMENT SWITCH
 # ------------------------------------------------------------
 # Main environment toggle for the whole bot.
 # Change only this value when switching between paper and live.
-IB_ENVIRONMENT = "paper"  # "paper" or "live"
+IB_ENVIRONMENT = "live"  # "paper" or "live"
 
 # ------------------------------------------------------------
 # EXECUTION MODE
@@ -42,10 +35,48 @@ IB_CONNECTIONS = {
 PENDING_TOPUP_FILE_TEMPLATE = "pending_topup_{account_key}.json"
 MAX_PENDING_TOPUP_AGE_DAYS = 7
 
+# NOTE:
+# Pending top-up completion uses real account cash, not
+# planned_allocation_cash. The cap only affects the initial
+# allocation decision for a run.
+
+
 # ------------------------------------------------------------
 # ACCOUNT DEFINITIONS
 # ------------------------------------------------------------
 # All adjustable account behavior lives here.
+# enabled:
+#   Whether this account is processed by the bot.
+#
+# account_ids:
+#   IBKR account IDs per environment.
+#   - paper: paper trading account ID
+#   - live : live trading account ID
+#
+# currency:
+#   Base currency used for cash checks and reporting.
+#
+# allocator:
+#   Name of the allocator to use.
+#   Must match a key in allocator_registry.py.
+#
+# planned_allocation_cash:
+#   Optional cash cap for this strategy run.
+#   - None: use full real available cash
+#   - number: use up to this amount, but never above real cash
+#
+# rules.min_cash_to_execute:
+#   Minimum usable cash required before execution is allowed.
+#
+# rules.pending_topup_enabled:
+#   Whether this account uses the pending top-up system.
+#
+# rules.topup_trigger:
+#   Fractional-share threshold that triggers a pending top-up
+#   instead of immediate purchase.
+#
+# etfs:
+#   ETF definitions used by the allocator for this account.
 ACCOUNTS = {
     "Pension": {
         "enabled": True,
@@ -55,6 +86,7 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "pension",
+        "planned_allocation_cash": None,
         "rules": {
             "min_cash_to_execute": 0,
             "pending_topup_enabled": True,
@@ -89,6 +121,7 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "joint",
+        "planned_allocation_cash": None,
         "rules": {
             "min_cash_to_execute": 100,
             "pending_topup_enabled": True,
@@ -111,6 +144,7 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "otto",
+        "planned_allocation_cash": None,
         "rules": {
             "min_cash_to_execute": 300,
             "pending_topup_enabled": True,

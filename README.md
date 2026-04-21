@@ -167,6 +167,28 @@ ACCOUNTS = {
     }
 }
 ```
+Planned Allocation Cash (Important)
+The bot supports an optional per-account setting:
+"planned_allocation_cash": 2100
+This controls how much cash is used for the allocation decision, without modifying the actual account balance.
+
+Behavior
+For each run:
+* The bot always reads real IBKR cash
+* If planned_allocation_cash is set:
+
+the bot uses:usable_cash = min(real_cash, planned_allocation_cash)
+If planned_allocation_cash = None: the bot uses full available cash
+
+Example
+* Real cash: EUR 8,000
+* Planned allocation cash: EUR 2,100
+* Usable cash for this run: EUR 2,100
+
+This allows you to:
+
+allocate only part of your account to this strategy
+simulate different allocation sizes before executing trades
 
 Each account defines:
 

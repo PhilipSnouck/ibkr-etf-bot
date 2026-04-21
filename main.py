@@ -35,7 +35,6 @@ from rules import (
 
 from config import (
     ACCOUNTS,
-    TEST_CASH_OVERRIDE,
     EXECUTION_MODE,
     IB_ENVIRONMENT,
 )
@@ -68,13 +67,6 @@ print("---------------------------------------------------------------")
 GREEN = "\033[92m"
 RESET = "\033[0m"
 
-# ------------------------------------------------------------
-# LIVE SAFETY GUARD
-# ------------------------------------------------------------
-if IB_ENVIRONMENT == "live" and TEST_CASH_OVERRIDE is not None:
-    raise RuntimeError(
-        "Safety stop: TEST_CASH_OVERRIDE must be None in live mode."
-    )
 
 # ------------------------------------------------------------
 # CONNECT TO IBKR ONCE
@@ -128,14 +120,58 @@ for account_name, account_settings in ACCOUNTS.items():
     # GET CASH
     # --------------------------------------------------------
     real_cash = get_account_cash(ib, account_id, currency=account_currency)
+    planned_allocation_cash = account_settings.get("planned_allocation_cash")
 
-    if TEST_CASH_OVERRIDE is not None:
-        cash = float(TEST_CASH_OVERRIDE)
+    if real_cash is None:
+        print(
+            f"\nSafety stop: could not retrieve cash balance for account "
+            f"{account_name}."
+        )
+        continue
+
+    if planned_allocation_cash is not None:
+        planned_allocation_cash = float(planned_allocation_cash)
+
+        if planned_allocation_cash <= 0:
+            print(
+                f"\nSafety stop: planned_allocation_cash must be greater than 0 "
+                f"for account {account_name}."
+            )
+            continue
+
+        if planned_allocation_cash > real_cash:
+            if BUY_CONFIRMED:
+                print(
+                    f"\nSafety stop: planned allocation cash exceeds real available cash "
+                    f"for account {account_name}."
+                )
+                print(f"Real cash: {account_currency} {real_cash:.2f}")
+                print(
+                    f"Planned allocation cash: "
+                    f"{account_currency} {planned_allocation_cash:.2f}"
+                )
+                continue
+            else:
+                print(
+                    f"\nWarning: planned allocation cash exceeds real available cash "
+                    f"for account {account_name}."
+                )
+                print(
+                    "Preview mode: using planned allocation cash for simulation."
+                )
+
+        cash = planned_allocation_cash
         print(f"\n{account_name} real cash: {account_currency} {real_cash:.2f}")
-        print(f"{account_name} test cash override: {account_currency} {cash:.2f}")
+        print(
+            f"{account_name} planned allocation cash: "
+            f"{account_currency} {planned_allocation_cash:.2f}"
+        )
+        print(f"{account_name} usable cash for this run: {account_currency} {cash:.2f}")
+
     else:
         cash = real_cash
-        print(f"\n{account_name} cash: {account_currency} {cash:.2f}")
+        print(f"\n{account_name} real cash: {account_currency} {real_cash:.2f}")
+        print(f"{account_name} usable cash for this run: {account_currency} {cash:.2f}")
 
     # --------------------------------------------------------
     # ACCOUNT-LEVEL CASH RULES
@@ -162,7 +198,7 @@ for account_name, account_settings in ACCOUNTS.items():
         if price is None or price <= 0:
             print(
                 f"\nSafety stop: no valid market price available for {symbol} "
-                f"(tried delayed streaming and delayed frozen)."
+                f"(after delayed streaming retry)."
             )
             invalid_price_found = True
 
