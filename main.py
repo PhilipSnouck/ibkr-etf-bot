@@ -183,6 +183,18 @@ for account_name, account_settings in ACCOUNTS.items():
     # --------------------------------------------------------
     qualified_contracts = qualify_etf_contracts(ib, etf_config)
 
+    missing_symbols = [
+        symbol for symbol in etf_config
+        if symbol not in qualified_contracts
+    ]
+
+    if missing_symbols:
+        print(
+            f"\nSafety stop: could not qualify contract(s) for account "
+            f"{account_name}: {', '.join(missing_symbols)}"
+        )
+        continue
+
     # --------------------------------------------------------
     # FETCH ETF PRICES
     # --------------------------------------------------------
@@ -313,22 +325,19 @@ for account_name, account_settings in ACCOUNTS.items():
         )
 
         if EXECUTION_MODE == "execute" and BUY_CONFIRMED:
-            from datetime import datetime, timezone
-            from pending_topup import save_pending_topup
-
-            pending_data = {
-                "created_at_utc": datetime.now(timezone.utc).isoformat(),
-                "account_name": account_name,
-                "account_id": account_id,
-                "symbol": topup["symbol"],
-                "target_shares": topup["target_shares"],
-                "remaining_cash_before_order": pending_cash_reference,
-                "topup_amount_at_creation": topup["topup_amount"],
-                "status": "waiting_for_topup",
+            pending_followup = {
+                "type": "save_pending_topup",
+                "data": {
+                    "account_name": account_name,
+                    "account_id": account_id,
+                    "symbol": topup["symbol"],
+                    "target_shares": topup["target_shares"],
+                    "remaining_cash_before_order": pending_cash_reference,
+                    "topup_amount_at_creation": topup["topup_amount"],
+                    "status": "waiting_for_topup",
+                },
             }
-
-            save_pending_topup(account_name, pending_data)
-            print("A pending top-up file has been saved.")
+            print("Pending top-up file will be saved only after successful execution.")
         else:
             print("Preview only: pending top-up file was NOT saved.")
 

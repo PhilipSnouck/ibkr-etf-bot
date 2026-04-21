@@ -65,6 +65,15 @@ def process_pending_topup(
         etf_config,
         symbols=[pending_symbol],
     )
+
+    if pending_symbol not in qualified_contracts:
+        print(
+            f"\nSafety stop: could not qualify contract for pending ETF "
+            f"{pending_symbol}."
+        )
+        print("Pending top-up file has been kept.")
+        return True
+
     prices = get_etf_prices(ib, qualified_contracts)
 
     contract = qualified_contracts[pending_symbol]
@@ -291,6 +300,30 @@ def execute_plan(ib, execution_queue):
         print("-" * len(header))
         print(f"{'TOTAL':5} | {'':6} | {'':10} | {total_spent:10.2f}")
 
-        if plan["pending_followup"] and plan["pending_followup"]["type"] == "clear_pending_topup":
-            clear_pending_topup(plan["account_name"])
-            print("Pending top-up file cleared.")
+        all_orders_filled = all(
+            order["final_status"] == "Filled"
+            for order in plan["orders"]
+        )
+
+        if plan["pending_followup"]:
+            followup_type = plan["pending_followup"]["type"]
+
+            if followup_type == "save_pending_topup":
+                if all_orders_filled:
+                    from datetime import datetime, timezone
+
+                    pending_data = {
+                        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                        **plan["pending_followup"]["data"],
+                    }
+                    save_pending_topup(plan["account_name"], pending_data)
+                    print("Pending top-up file saved.")
+                else:
+                    print("Pending top-up file NOT saved because execution was not fully filled.")
+
+            elif followup_type == "clear_pending_topup":
+                if all_orders_filled:
+                    clear_pending_topup(plan["account_name"])
+                    print("Pending top-up file cleared.")
+                else:
+                    print("Pending top-up file kept because execution was not fully filled.")
