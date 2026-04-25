@@ -137,16 +137,16 @@ ACCOUNTS = {
         },
     },
     "Otto": {
-        "enabled": False,
+        "enabled": True,
         "account_ids": {
             "paper": None,
-            "live": None,
+            "live": "U25477636",
         },
         "currency": "EUR",
         "allocator": "otto",
         "planned_allocation_cash": None,
         "rules": {
-            "min_cash_to_execute": 300,
+            "min_cash_to_execute": 375,
             "pending_topup_enabled": True,
             "topup_trigger": 0.75,
         },
