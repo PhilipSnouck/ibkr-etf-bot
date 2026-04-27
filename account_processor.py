@@ -3,7 +3,7 @@
 # ------------------------------------------------------------
 
 from datetime import datetime, timezone
-
+from config import ORDER_COMMISSION_BUFFER, MARKET_ORDER_BUFFER
 from broker import (
     get_account_cash,
     qualify_etf_contracts,
@@ -89,7 +89,11 @@ def process_pending_topup(
         print("Pending top-up file has been kept.")
         return True
 
-    required_cash_now = pending["target_shares"] * current_price
+    required_cash_now = (
+        pending["target_shares"] * current_price
+        + ORDER_COMMISSION_BUFFER
+        + MARKET_ORDER_BUFFER
+    )
     shortfall = required_cash_now - real_cash
     pending_age = pending_topup_age_days(pending)
 
