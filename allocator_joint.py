@@ -3,11 +3,11 @@ from math import floor, ceil
 from config import ORDER_COMMISSION_BUFFER, MARKET_ORDER_BUFFER
 
 
-def allocate_otto_portfolio(cash, etf_config, prices, topup_trigger=0.75):
+def allocate_joint_portfolio(cash, etf_config, prices, topup_trigger=0.75):
     symbols = list(etf_config.keys())
 
     if len(symbols) != 1:
-        raise ValueError("Otto allocator expects exactly 1 ETF.")
+        raise ValueError("Joint allocator expects exactly 1 ETF.")
 
     symbol = symbols[0]
     settings = etf_config[symbol]
