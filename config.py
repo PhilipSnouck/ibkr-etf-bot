@@ -54,8 +54,21 @@ ORDER_COMMISSION_BUFFER = 1.25
 # This buffer is only needed for the final cash-limiting order:
 # - ETF3 in a 3-ETF account
 # - the single ETF in a 1-ETF account
-MARKET_ORDER_BUFFER = 10.00
+MARKET_ORDER_BUFFER = 0
 
+# ------------------------------------------------------------
+# LIMIT ORDER SETTINGS
+# ------------------------------------------------------------
+# Used only for accounts with:
+# "order_type": "limit"
+#
+# Limit price = detected price * (1 + limit_order_markup)
+#
+# Example:
+# price = 116.60
+# limit_order_markup = 0.005
+# limit price = 117.18
+DEFAULT_LIMIT_ORDER_MARKUP = 0.005
 
 # ------------------------------------------------------------
 # ACCOUNT DEFINITIONS
@@ -102,6 +115,8 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "pension",
+        "order_type": "limit",
+        "limit_order_markup": 0.005,
         "planned_allocation_cash": None,
         "rules": {
             "min_cash_to_execute": 0,
@@ -137,6 +152,8 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "joint",
+        "order_type": "limit",
+        "limit_order_markup": 0.005,
         "planned_allocation_cash": None,
         "rules": {
             "min_cash_to_execute": 100,
@@ -160,6 +177,8 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "otto",
+        "order_type": "limit",
+        "limit_order_markup": 0.005,
         "planned_allocation_cash": None,
         "rules": {
             "min_cash_to_execute": 375,

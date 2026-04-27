@@ -37,6 +37,7 @@ from config import (
     ACCOUNTS,
     EXECUTION_MODE,
     IB_ENVIRONMENT,
+    DEFAULT_LIMIT_ORDER_MARKUP,
 )
 
 from account_processor import (
@@ -297,13 +298,26 @@ for account_name, account_settings in ACCOUNTS.items():
         if shares[symbol] <= 0:
             continue
 
-        orders.append(
-            {
-                "symbol": symbol,
-                "contract": qualified_contracts[symbol],
-                "quantity": shares[symbol],
-            }
+        order_type = account_settings.get("order_type", "market")
+        limit_order_markup = account_settings.get(
+            "limit_order_markup",
+            DEFAULT_LIMIT_ORDER_MARKUP,
         )
+
+        order = {
+            "symbol": symbol,
+            "contract": qualified_contracts[symbol],
+            "quantity": shares[symbol],
+            "order_type": order_type,
+        }
+
+        if order_type == "limit":
+            order["limit_price"] = round(
+                prices[symbol] * (1 + limit_order_markup),
+                2,
+            )
+
+        orders.append(order)
 
     pending_followup = None
 

@@ -3,13 +3,17 @@
 # ------------------------------------------------------------
 
 from datetime import datetime, timezone
-from config import ORDER_COMMISSION_BUFFER, MARKET_ORDER_BUFFER
+from config import (
+    ORDER_COMMISSION_BUFFER,
+    MARKET_ORDER_BUFFER,
+    DEFAULT_LIMIT_ORDER_MARKUP,
+)
 from broker import (
     get_account_cash,
     qualify_etf_contracts,
     get_etf_prices,
     is_contract_open_now,
-    place_market_order,
+    place_order,
     wait_for_order_status,
 )
 
@@ -89,10 +93,26 @@ def process_pending_topup(
         print("Pending top-up file has been kept.")
         return True
 
+    order_type = account_settings.get("order_type", "market")
+
+    if order_type == "limit":
+        limit_order_markup = account_settings.get(
+            "limit_order_markup",
+            DEFAULT_LIMIT_ORDER_MARKUP,
+        )
+        effective_order_price = round(
+            current_price * (1 + limit_order_markup),
+            2,
+        )
+        extra_order_buffer = 0.0
+    else:
+        effective_order_price = current_price
+        extra_order_buffer = MARKET_ORDER_BUFFER
+
     required_cash_now = (
-        pending["target_shares"] * current_price
+        pending["target_shares"] * effective_order_price
         + ORDER_COMMISSION_BUFFER
-        + MARKET_ORDER_BUFFER
+        + extra_order_buffer
     )
     shortfall = required_cash_now - real_cash
     pending_age = pending_topup_age_days(pending)
@@ -152,6 +172,20 @@ def process_pending_topup(
                             "symbol": pending_symbol,
                             "contract": contract,
                             "quantity": pending["target_shares"],
+                            "order_type": account_settings.get("order_type", "market"),
+                            "limit_price": round(
+                                current_price
+                                * (
+                                    1
+                                    + account_settings.get(
+                                        "limit_order_markup",
+                                        DEFAULT_LIMIT_ORDER_MARKUP,
+                                    )
+                                ),
+                                2,
+                            )
+                            if account_settings.get("order_type", "market") == "limit"
+                            else None,
                         }
                     ],
                     "pending_followup": {
@@ -271,11 +305,13 @@ def execute_plan(ib, execution_queue):
             print("No immediate orders to place for this account.")
 
         for order in plan["orders"]:
-            trade = place_market_order(
+            trade = place_order(
                 ib=ib,
                 contract=order["contract"],
                 quantity=order["quantity"],
                 account_id=plan["account_id"],
+                order_type=order.get("order_type", "market"),
+                limit_price=order.get("limit_price"),
             )
 
             order["trade"] = trade

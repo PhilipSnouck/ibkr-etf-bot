@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from math import isfinite
 from zoneinfo import ZoneInfo
 
-from ib_async import IB, Stock, MarketOrder
+from ib_async import IB, Stock, MarketOrder, LimitOrder
 from config import IB_CONNECTIONS, IB_ENVIRONMENT
 
 
@@ -252,13 +252,20 @@ def is_contract_open_now(ib, contract):
 
 
 # ------------------------------------------------------------
-# PLACE MARKET ORDER
+# PLACE ORDER
 # ------------------------------------------------------------
-def place_market_order(ib, contract, quantity, account_id):
+def place_order(ib, contract, quantity, account_id, order_type="market", limit_price=None):
     if quantity <= 0:
         raise ValueError("Quantity must be greater than 0.")
 
-    order = MarketOrder("BUY", quantity)
+    if order_type == "limit":
+        if limit_price is None or limit_price <= 0:
+            raise ValueError("Limit price must be greater than 0 for limit orders.")
+
+        order = LimitOrder("BUY", quantity, round(limit_price, 2))
+    else:
+        order = MarketOrder("BUY", quantity)
+
     order.account = account_id
     order.tif = "DAY"
 
