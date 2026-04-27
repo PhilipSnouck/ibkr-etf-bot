@@ -288,7 +288,7 @@ for account_name, account_settings in ACCOUNTS.items():
 
     print("Top-up triggered:", "YES" if topup["needed"] else "NO")
 
-    # --------------------------------------------------------
+     # --------------------------------------------------------
     # BUILD EXECUTION PLAN
     # --------------------------------------------------------
     orders = []
@@ -342,27 +342,36 @@ for account_name, account_settings in ACCOUNTS.items():
             print("Preview only: pending top-up file was NOT saved.")
 
     if (
-        orders
-        and passes_cash_rule
+        passes_cash_rule
         and not market_blocked
         and EXECUTION_MODE == "execute"
         and BUY_CONFIRMED
     ):
-        execution_queue.append(
-            {
-                "account_name": account_name,
-                "account_id": account_id,
-                "account_currency": account_currency,
-                "orders": orders,
-                "pending_followup": pending_followup,
-            }
-        )
-    elif orders:
+        if orders:
+            execution_queue.append(
+                {
+                    "account_name": account_name,
+                    "account_id": account_id,
+                    "account_currency": account_currency,
+                    "orders": orders,
+                    "pending_followup": pending_followup,
+                }
+            )
+        elif pending_followup:
+            execution_queue.append(
+                {
+                    "account_name": account_name,
+                    "account_id": account_id,
+                    "account_currency": account_currency,
+                    "orders": [],
+                    "pending_followup": pending_followup,
+                }
+            )
+    elif orders or pending_followup:
         if EXECUTION_MODE != "execute":
             print("\nPreview only: EXECUTION_MODE is not 'execute'. No orders will be placed.")
         elif not BUY_CONFIRMED:
             print("\nPreview only: no 'buy' command given. No orders will be placed.")
-
 # ------------------------------------------------------------
 # EXECUTION PHASE
 # ------------------------------------------------------------

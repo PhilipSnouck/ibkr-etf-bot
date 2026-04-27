@@ -42,6 +42,22 @@ MAX_PENDING_TOPUP_AGE_DAYS = 7
 
 
 # ------------------------------------------------------------
+# ORDER CASH BUFFER SETTINGS
+# ------------------------------------------------------------
+# IBKR charges commission per order.
+# This amount is reserved for every order the bot plans to place.
+ORDER_COMMISSION_BUFFER = 1.25
+
+# Market orders can require extra available cash because the final
+# execution price may be slightly higher than the preview price.
+#
+# This buffer is only needed for the final cash-limiting order:
+# - ETF3 in a 3-ETF account
+# - the single ETF in a 1-ETF account
+MARKET_ORDER_BUFFER = 10.00
+
+
+# ------------------------------------------------------------
 # ACCOUNT DEFINITIONS
 # ------------------------------------------------------------
 # All adjustable account behavior lives here.

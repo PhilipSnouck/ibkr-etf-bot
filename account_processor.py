@@ -263,6 +263,9 @@ def execute_plan(ib, execution_queue):
         print(f"Executing account: {plan['account_name']}")
         print("------------------------------------------------------------")
 
+        if not plan["orders"]:
+            print("No immediate orders to place for this account.")
+
         for order in plan["orders"]:
             trade = place_market_order(
                 ib=ib,
@@ -274,34 +277,35 @@ def execute_plan(ib, execution_queue):
             order["trade"] = trade
             order["final_status"] = wait_for_order_status(ib, trade)
 
-        print("\n--- EXECUTION SUMMARY ---\n")
+        if plan["orders"]:
+            print("\n--- EXECUTION SUMMARY ---\n")
 
-        header = f"{'ETF':5} | {'Shares':>6} | {'Avg Price':>10} | {'Total':>10}"
-        print(header)
-        print("-" * len(header))
+            header = f"{'ETF':5} | {'Shares':>6} | {'Avg Price':>10} | {'Total':>10}"
+            print(header)
+            print("-" * len(header))
 
-        total_spent = 0.0
+            total_spent = 0.0
 
-        for order in plan["orders"]:
-            trade = order["trade"]
-            filled = trade.orderStatus.filled
-            avg_price = trade.orderStatus.avgFillPrice
-            total = filled * avg_price
+            for order in plan["orders"]:
+                trade = order["trade"]
+                filled = trade.orderStatus.filled
+                avg_price = trade.orderStatus.avgFillPrice
+                total = filled * avg_price
 
-            total_spent += total
+                total_spent += total
 
-            print(
-                f"{order['symbol']:5} | "
-                f"{filled:6.0f} | "
-                f"{avg_price:10.2f} | "
-                f"{total:10.2f}"
-            )
+                print(
+                    f"{order['symbol']:5} | "
+                    f"{filled:6.0f} | "
+                    f"{avg_price:10.2f} | "
+                    f"{total:10.2f}"
+                )
 
-        print("-" * len(header))
-        print(f"{'TOTAL':5} | {'':6} | {'':10} | {total_spent:10.2f}")
+            print("-" * len(header))
+            print(f"{'TOTAL':5} | {'':6} | {'':10} | {total_spent:10.2f}")
 
         all_orders_filled = all(
-            order["final_status"] == "Filled"
+            order.get("final_status") == "Filled"
             for order in plan["orders"]
         )
 
@@ -310,8 +314,6 @@ def execute_plan(ib, execution_queue):
 
             if followup_type == "save_pending_topup":
                 if all_orders_filled:
-                    from datetime import datetime, timezone
-
                     pending_data = {
                         "created_at_utc": datetime.now(timezone.utc).isoformat(),
                         **plan["pending_followup"]["data"],

@@ -1,41 +1,22 @@
 from math import floor, ceil
 
+from config import ORDER_COMMISSION_BUFFER, MARKET_ORDER_BUFFER
 
-# ------------------------------------------------------------
-# JOINT ACCOUNT ALLOCATOR
-# ------------------------------------------------------------
-# Purpose:
-# This allocator calculates how to allocate cash for the Joint
-# account, which currently consists of a single ETF.
-#
-# Rules:
-# - 100% of available cash is allocated to the ETF
-# - if the raw share count has a fractional part below the
-#   top-up trigger, we round down and buy that number of shares
-# - if the fractional part is at or above the top-up trigger,
-#   we buy 0 shares for now and create a pending top-up instead
-#
-# Expected inputs:
-# - cash (float): available cash to allocate
-# - etf_config (dict): ETF settings from config.py
-# - prices (dict): symbol -> price mapping
-# - topup_trigger (float): fractional threshold (e.g. 0.75)
-#
-# Output format:
-# Matches the shared allocator contract used by main.py
-# ------------------------------------------------------------
 
-def allocate_joint_portfolio(cash, etf_config, prices, topup_trigger=0.75):
+def allocate_otto_portfolio(cash, etf_config, prices, topup_trigger=0.75):
     symbols = list(etf_config.keys())
 
     if len(symbols) != 1:
-        raise ValueError("Joint allocator expects exactly 1 ETF.")
+        raise ValueError("Otto allocator expects exactly 1 ETF.")
 
     symbol = symbols[0]
     settings = etf_config[symbol]
     price = prices[symbol]
 
-    target_budget = cash * settings["target_weight"]
+    effective_cash = cash - ORDER_COMMISSION_BUFFER - MARKET_ORDER_BUFFER
+    effective_cash = max(effective_cash, 0)
+
+    target_budget = effective_cash * settings["target_weight"]
 
     raw_shares = target_budget / price
     floor_shares = floor(raw_shares)
@@ -46,45 +27,46 @@ def allocate_joint_portfolio(cash, etf_config, prices, topup_trigger=0.75):
     topup_amount = 0.0
     target_shares = floor_shares
 
-    # --------------------------------------------------------
-    # TOP-UP DECISION
-    # --------------------------------------------------------
     if fractional_part >= topup_trigger and raw_shares > 0:
         topup_needed = True
         target_shares = ceil_shares
         chosen_shares = 0
         spent = 0.0
-        topup_amount = (target_shares * price) - cash
+
+        topup_amount = (
+            target_shares * price
+            + ORDER_COMMISSION_BUFFER
+            + MARKET_ORDER_BUFFER
+            - cash
+        )
     else:
         chosen_shares = floor_shares
         spent = chosen_shares * price
 
-        # Safety guard:
-        # even after rounding logic, never allow spent cash
-        # to exceed available cash.
-        while chosen_shares > 0 and spent > cash:
+        required_cash = (
+            spent
+            + ORDER_COMMISSION_BUFFER
+            + MARKET_ORDER_BUFFER
+        )
+
+        while chosen_shares > 0 and required_cash > cash:
             chosen_shares -= 1
             spent = chosen_shares * price
+            required_cash = (
+                spent
+                + ORDER_COMMISSION_BUFFER
+                + MARKET_ORDER_BUFFER
+            )
 
-    # --------------------------------------------------------
-    # FINAL TOTALS
-    # --------------------------------------------------------
     leftover_cash = cash - spent
     total_spent = spent
-
     actual_pct = 100.0 if total_spent > 0 else 0.0
 
     return {
         "symbols": [symbol],
-        "shares": {
-            symbol: chosen_shares,
-        },
-        "spent": {
-            symbol: spent,
-        },
-        "raw": {
-            symbol: raw_shares,
-        },
+        "shares": {symbol: chosen_shares},
+        "spent": {symbol: spent},
+        "raw": {symbol: raw_shares},
         "diagnostics": {
             f"{symbol.lower()}_fractional_part": fractional_part,
         },
@@ -99,7 +81,5 @@ def allocate_joint_portfolio(cash, etf_config, prices, topup_trigger=0.75):
             "total_spent": total_spent,
             "leftover_cash": leftover_cash,
         },
-        "actual_pct": {
-            symbol: actual_pct,
-        },
+        "actual_pct": {symbol: actual_pct},
     }
