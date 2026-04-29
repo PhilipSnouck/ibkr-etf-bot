@@ -181,7 +181,7 @@ ACCOUNTS = {
         "limit_order_markup": 0.005,
         "planned_allocation_cash": None,
         "rules": {
-            "min_cash_to_execute": 375,
+            "min_cash_to_execute": 100,
             "pending_topup_enabled": True,
             "topup_trigger": 0.75,
         },
