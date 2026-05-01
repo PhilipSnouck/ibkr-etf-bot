@@ -1,6 +1,6 @@
 from math import floor, ceil
 
-from config import ORDER_COMMISSION_BUFFER, MARKET_ORDER_BUFFER
+from config import ORDER_COMMISSION_BUFFER
 
 # ------------------------------------------------------------
 # PENSION ALLOCATOR
@@ -83,11 +83,7 @@ def allocate_pension_portfolio(cash, etf_config, prices, topup_trigger=0.75):
     # --------------------------------------------------------
     # ETF 3
     # --------------------------------------------------------
-    cash_available_for_etf_3 = (
-        remaining_after_2
-        - ORDER_COMMISSION_BUFFER
-        - MARKET_ORDER_BUFFER
-    )
+    cash_available_for_etf_3 = remaining_after_2 - ORDER_COMMISSION_BUFFER
 
     raw_3 = max(cash_available_for_etf_3, 0) / price_3
     floor_3 = floor(raw_3)
@@ -106,33 +102,25 @@ def allocate_pension_portfolio(cash, etf_config, prices, topup_trigger=0.75):
         topup_amount = (
             target_shares_3 * price_3
             + ORDER_COMMISSION_BUFFER
-            + MARKET_ORDER_BUFFER
             - remaining_after_2
         )
     else:
         shares_3 = floor_3
         spent_3 = shares_3 * price_3
 
-        required_cash_3 = (
-            spent_3
-            + ORDER_COMMISSION_BUFFER
-            + MARKET_ORDER_BUFFER
-        )
+        required_cash_3 = spent_3 + ORDER_COMMISSION_BUFFER
 
         while shares_3 > 0 and required_cash_3 > remaining_after_2:
             shares_3 -= 1
             spent_3 = shares_3 * price_3
-            required_cash_3 = (
-                spent_3
-                + ORDER_COMMISSION_BUFFER
-                + MARKET_ORDER_BUFFER
-            )
+            required_cash_3 = spent_3 + ORDER_COMMISSION_BUFFER
 
     # --------------------------------------------------------
     # FINAL TOTALS
     # --------------------------------------------------------
     total_spent = spent_1 + spent_2 + spent_3
-    leftover_cash = cash - total_spent
+    orders_placed = sum(1 for s in [shares_1, shares_2, shares_3] if s > 0)
+    leftover_cash = cash - total_spent - (orders_placed * ORDER_COMMISSION_BUFFER)
 
     if total_spent > 0:
         actual_pct_1 = (spent_1 / total_spent) * 100

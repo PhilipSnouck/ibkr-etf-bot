@@ -1,6 +1,6 @@
 from math import floor, ceil
 
-from config import ORDER_COMMISSION_BUFFER, MARKET_ORDER_BUFFER
+from config import ORDER_COMMISSION_BUFFER
 
 
 def allocate_joint_portfolio(cash, etf_config, prices, topup_trigger=0.75):
@@ -13,7 +13,7 @@ def allocate_joint_portfolio(cash, etf_config, prices, topup_trigger=0.75):
     settings = etf_config[symbol]
     price = prices[symbol]
 
-    effective_cash = cash - ORDER_COMMISSION_BUFFER - MARKET_ORDER_BUFFER
+    effective_cash = cash - ORDER_COMMISSION_BUFFER
     effective_cash = max(effective_cash, 0)
 
     target_budget = effective_cash * settings["target_weight"]
@@ -36,29 +36,20 @@ def allocate_joint_portfolio(cash, etf_config, prices, topup_trigger=0.75):
         topup_amount = (
             target_shares * price
             + ORDER_COMMISSION_BUFFER
-            + MARKET_ORDER_BUFFER
             - cash
         )
     else:
         chosen_shares = floor_shares
         spent = chosen_shares * price
 
-        required_cash = (
-            spent
-            + ORDER_COMMISSION_BUFFER
-            + MARKET_ORDER_BUFFER
-        )
+        required_cash = spent + ORDER_COMMISSION_BUFFER
 
         while chosen_shares > 0 and required_cash > cash:
             chosen_shares -= 1
             spent = chosen_shares * price
-            required_cash = (
-                spent
-                + ORDER_COMMISSION_BUFFER
-                + MARKET_ORDER_BUFFER
-            )
+            required_cash = spent + ORDER_COMMISSION_BUFFER
 
-    leftover_cash = cash - spent
+    leftover_cash = cash - spent - (ORDER_COMMISSION_BUFFER if chosen_shares > 0 else 0)
     total_spent = spent
     actual_pct = 100.0 if total_spent > 0 else 0.0
 

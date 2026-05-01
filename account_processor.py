@@ -5,7 +5,6 @@
 from datetime import datetime, timezone
 from config import (
     ORDER_COMMISSION_BUFFER,
-    MARKET_ORDER_BUFFER,
     DEFAULT_LIMIT_ORDER_MARKUP,
 )
 from broker import (
@@ -14,7 +13,7 @@ from broker import (
     get_etf_prices,
     is_contract_open_now,
     place_order,
-    wait_for_order_status,
+    calc_limit_price,
 )
 
 from pending_topup import (
@@ -93,27 +92,9 @@ def process_pending_topup(
         print("Pending top-up file has been kept.")
         return True
 
-    order_type = account_settings.get("order_type", "market")
-
-    if order_type == "limit":
-        limit_order_markup = account_settings.get(
-            "limit_order_markup",
-            DEFAULT_LIMIT_ORDER_MARKUP,
-        )
-        effective_order_price = round(
-            current_price * (1 + limit_order_markup),
-            2,
-        )
-        extra_order_buffer = 0.0
-    else:
-        effective_order_price = current_price
-        extra_order_buffer = MARKET_ORDER_BUFFER
-
-    required_cash_now = (
-        pending["target_shares"] * effective_order_price
-        + ORDER_COMMISSION_BUFFER
-        + extra_order_buffer
-    )
+    limit_order_markup = account_settings.get("limit_order_markup", DEFAULT_LIMIT_ORDER_MARKUP)
+    effective_order_price = calc_limit_price(current_price, limit_order_markup)
+    required_cash_now = pending["target_shares"] * effective_order_price + ORDER_COMMISSION_BUFFER
     shortfall = required_cash_now - real_cash
     pending_age = pending_topup_age_days(pending)
 
@@ -172,20 +153,10 @@ def process_pending_topup(
                             "symbol": pending_symbol,
                             "contract": contract,
                             "quantity": pending["target_shares"],
-                            "order_type": account_settings.get("order_type", "market"),
-                            "limit_price": round(
-                                current_price
-                                * (
-                                    1
-                                    + account_settings.get(
-                                        "limit_order_markup",
-                                        DEFAULT_LIMIT_ORDER_MARKUP,
-                                    )
-                                ),
-                                2,
-                            )
-                            if account_settings.get("order_type", "market") == "limit"
-                            else None,
+                            "limit_price": calc_limit_price(
+                                current_price,
+                                account_settings.get("limit_order_markup", DEFAULT_LIMIT_ORDER_MARKUP),
+                            ),
                         }
                     ],
                     "pending_followup": {
@@ -304,23 +275,52 @@ def execute_plan(ib, execution_queue):
         if not plan["orders"]:
             print("No immediate orders to place for this account.")
 
+        # Phase 1: place all orders simultaneously
         for order in plan["orders"]:
             trade = place_order(
                 ib=ib,
                 contract=order["contract"],
                 quantity=order["quantity"],
                 account_id=plan["account_id"],
-                order_type=order.get("order_type", "market"),
-                limit_price=order.get("limit_price"),
+                limit_price=order["limit_price"],
             )
-
             order["trade"] = trade
-            order["final_status"] = wait_for_order_status(ib, trade)
+
+        # Phase 2: wait for all orders to reach a terminal status
+        _TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+        _TIMEOUT = 120
+
+        if plan["orders"]:
+            start = datetime.now()
+            while True:
+                still_pending = [
+                    o for o in plan["orders"]
+                    if o["trade"].orderStatus.status not in _TERMINAL
+                ]
+                if not still_pending:
+                    break
+                if (datetime.now() - start).total_seconds() >= _TIMEOUT:
+                    break
+                ib.sleep(1)
+
+        for order in plan["orders"]:
+            order["final_status"] = order["trade"].orderStatus.status
+
+        timed_out = [
+            o for o in plan["orders"]
+            if o["final_status"] not in _TERMINAL
+        ]
+
+        if timed_out:
+            print("\nWarning: the following orders did not confirm within 2 minutes:")
+            for o in timed_out:
+                print(f"  {o['symbol']}: status '{o['final_status']}' — may still be open at IBKR.")
+            print("Check TWS before re-running the bot.")
 
         if plan["orders"]:
             print("\n--- EXECUTION SUMMARY ---\n")
 
-            header = f"{'ETF':5} | {'Shares':>6} | {'Avg Price':>10} | {'Total':>10}"
+            header = f"{'ETF':5} | {'Shares':>6} | {'Avg Price':>10} | {'Total':>10} | {'Status':<12}"
             print(header)
             print("-" * len(header))
 
@@ -331,14 +331,14 @@ def execute_plan(ib, execution_queue):
                 filled = trade.orderStatus.filled
                 avg_price = trade.orderStatus.avgFillPrice
                 total = filled * avg_price
-
                 total_spent += total
 
                 print(
                     f"{order['symbol']:5} | "
                     f"{filled:6.0f} | "
                     f"{avg_price:10.2f} | "
-                    f"{total:10.2f}"
+                    f"{total:10.2f} | "
+                    f"{order['final_status']:<12}"
                 )
 
             print("-" * len(header))

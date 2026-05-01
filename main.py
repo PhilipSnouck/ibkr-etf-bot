@@ -19,6 +19,7 @@ from broker import (
     qualify_etf_contracts,
     get_etf_prices,
     is_contract_open_now,
+    calc_limit_price,
 )
 
 from allocator_registry import get_allocator
@@ -38,6 +39,7 @@ from config import (
     EXECUTION_MODE,
     IB_ENVIRONMENT,
     DEFAULT_LIMIT_ORDER_MARKUP,
+    ORDER_COMMISSION_BUFFER,
 )
 
 from account_processor import (
@@ -239,6 +241,16 @@ for account_name, account_settings in ACCOUNTS.items():
     totals = result["totals"]
     actual_pct = result["actual_pct"]
 
+    limit_order_markup = account_settings.get("limit_order_markup", DEFAULT_LIMIT_ORDER_MARKUP)
+
+    if topup["needed"]:
+        topup_limit_price = calc_limit_price(prices[topup["symbol"]], limit_order_markup)
+        cash_ref = topup.get("remaining_cash_before_etf3", cash)
+        topup["topup_amount"] = max(
+            topup["target_shares"] * topup_limit_price + ORDER_COMMISSION_BUFFER - cash_ref,
+            0.0,
+        )
+
     # --------------------------------------------------------
     # CHECK MARKET HOURS
     # --------------------------------------------------------
@@ -298,34 +310,17 @@ for account_name, account_settings in ACCOUNTS.items():
         if shares[symbol] <= 0:
             continue
 
-        order_type = account_settings.get("order_type", "market")
-        limit_order_markup = account_settings.get(
-            "limit_order_markup",
-            DEFAULT_LIMIT_ORDER_MARKUP,
-        )
-
-        order = {
+        orders.append({
             "symbol": symbol,
             "contract": qualified_contracts[symbol],
             "quantity": shares[symbol],
-            "order_type": order_type,
-        }
-
-        if order_type == "limit":
-            order["limit_price"] = round(
-                prices[symbol] * (1 + limit_order_markup),
-                2,
-            )
-
-        orders.append(order)
+            "limit_price": calc_limit_price(prices[symbol], limit_order_markup),
+        })
 
     pending_followup = None
 
     if passes_cash_rule and topup["needed"] and pending_topup_enabled(account_settings):
-        pending_cash_reference = topup.get(
-            "remaining_cash_before_order",
-            topup.get("remaining_cash_before_etf3", cash),
-        )
+        pending_cash_reference = topup.get("remaining_cash_before_etf3", cash)
 
         print("\n--- PENDING TOP-UP REQUIRED ---")
         print(f"{topup['symbol']} was NOT bought.")

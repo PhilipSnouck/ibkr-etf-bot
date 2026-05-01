@@ -48,14 +48,6 @@ MAX_PENDING_TOPUP_AGE_DAYS = 7
 # This amount is reserved for every order the bot plans to place.
 ORDER_COMMISSION_BUFFER = 1.25
 
-# Market orders can require extra available cash because the final
-# execution price may be slightly higher than the preview price.
-#
-# This buffer is only needed for the final cash-limiting order:
-# - ETF3 in a 3-ETF account
-# - the single ETF in a 1-ETF account
-MARKET_ORDER_BUFFER = 0
-
 # ------------------------------------------------------------
 # LIMIT ORDER SETTINGS
 # ------------------------------------------------------------
@@ -115,7 +107,6 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "pension",
-        "order_type": "limit",
         "limit_order_markup": 0.005,
         "planned_allocation_cash": None,
         "rules": {
@@ -152,7 +143,6 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "joint",
-        "order_type": "limit",
         "limit_order_markup": 0.005,
         "planned_allocation_cash": None,
         "rules": {
@@ -177,7 +167,6 @@ ACCOUNTS = {
         },
         "currency": "EUR",
         "allocator": "otto",
-        "order_type": "limit",
         "limit_order_markup": 0.005,
         "planned_allocation_cash": None,
         "rules": {

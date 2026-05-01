@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from math import isfinite
 from zoneinfo import ZoneInfo
 
-from ib_async import IB, Stock, MarketOrder, LimitOrder
+from ib_async import IB, Stock, LimitOrder
 from config import IB_CONNECTIONS, IB_ENVIRONMENT
 
 
@@ -17,11 +17,21 @@ def connect_ib():
 
     connection = IB_CONNECTIONS[IB_ENVIRONMENT]
 
-    ib.connect(
-        connection["host"],
-        connection["port"],
-        clientId=connection["client_id"],
-    )
+    try:
+        ib.connect(
+            connection["host"],
+            connection["port"],
+            clientId=connection["client_id"],
+        )
+    except Exception:
+        print(
+            f"\nCould not connect to IBKR."
+            f"\n  Environment : {IB_ENVIRONMENT}"
+            f"\n  Host        : {connection['host']}"
+            f"\n  Port        : {connection['port']}"
+            f"\n\nIs TWS or IBKR Gateway running? Is the port correct in config.py?"
+        )
+        raise SystemExit(1)
 
     # Use delayed data if live market data is unavailable
     ib.reqMarketDataType(3)
@@ -252,20 +262,23 @@ def is_contract_open_now(ib, contract):
 
 
 # ------------------------------------------------------------
+# LIMIT PRICE HELPER
+# ------------------------------------------------------------
+def calc_limit_price(price, markup):
+    return round(price * (1 + markup), 2)
+
+
+# ------------------------------------------------------------
 # PLACE ORDER
 # ------------------------------------------------------------
-def place_order(ib, contract, quantity, account_id, order_type="market", limit_price=None):
+def place_order(ib, contract, quantity, account_id, limit_price):
     if quantity <= 0:
         raise ValueError("Quantity must be greater than 0.")
 
-    if order_type == "limit":
-        if limit_price is None or limit_price <= 0:
-            raise ValueError("Limit price must be greater than 0 for limit orders.")
+    if limit_price is None or limit_price <= 0:
+        raise ValueError("Limit price must be greater than 0.")
 
-        order = LimitOrder("BUY", quantity, round(limit_price, 2))
-    else:
-        order = MarketOrder("BUY", quantity)
-
+    order = LimitOrder("BUY", quantity, round(limit_price, 2))
     order.account = account_id
     order.tif = "DAY"
 
@@ -273,20 +286,3 @@ def place_order(ib, contract, quantity, account_id, order_type="market", limit_p
     return trade
 
 
-# ------------------------------------------------------------
-# WAIT FOR ORDER STATUS
-# ------------------------------------------------------------
-def wait_for_order_status(ib, trade, timeout_seconds=15):
-    start = datetime.now()
-
-    while True:
-        status = trade.orderStatus.status
-
-        if status in {"Filled", "Cancelled", "ApiCancelled", "Inactive"}:
-            return status
-
-        elapsed = (datetime.now() - start).total_seconds()
-        if elapsed >= timeout_seconds:
-            return status
-
-        ib.sleep(1)
