@@ -17,7 +17,7 @@ EXECUTION_MODE = "execute"  # "preview" or "execute"
 # ------------------------------------------------------------
 # Set to the full path of StartIBCWin.bat to auto-start IB Gateway
 # when the bot cannot connect. Set to None to disable.
-IBC_SCRIPT_PATH = r"C:\IBC\StartIBCWin.bat"
+IBC_SCRIPT_PATH = r"C:\Users\p.snouckaert\OneDrive - Pamoja\Documents\IBC\StartGateway.bat"
 
 # ------------------------------------------------------------
 # IBKR CONNECTION SETTINGS

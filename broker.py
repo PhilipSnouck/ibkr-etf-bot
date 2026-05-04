@@ -1,6 +1,7 @@
 # ------------------------------------------------------------
 # IMPORTS
 # ------------------------------------------------------------
+import logging
 import os
 import subprocess
 import time
@@ -24,8 +25,12 @@ def connect_ib():
     connection = IB_CONNECTIONS[IB_ENVIRONMENT]
     gateway_started = False
 
+    ib_log = logging.getLogger('ib_async')
+    orig_level = ib_log.level
+
     for attempt in range(1, _MAX_CONNECT_ATTEMPTS + 1):
         try:
+            ib_log.setLevel(logging.CRITICAL)
             ib.connect(
                 connection["host"],
                 connection["port"],
@@ -33,6 +38,7 @@ def connect_ib():
             )
             break
         except Exception:
+            ib_log.setLevel(orig_level)
             if attempt == 1 and IBC_SCRIPT_PATH:
                 if not os.path.exists(IBC_SCRIPT_PATH):
                     print(f"\nIBC script not found at: {IBC_SCRIPT_PATH}")
@@ -54,8 +60,16 @@ def connect_ib():
                 print(f"  Waiting for Gateway... ({attempt}/{_MAX_CONNECT_ATTEMPTS})")
             time.sleep(_CONNECT_RETRY_DELAY)
 
+    ib_log.setLevel(orig_level)
+
     # Use delayed data if live market data is unavailable
     ib.reqMarketDataType(3)
+
+    # After a fresh IBC-triggered start, give Gateway extra time to establish
+    # its market data connections before the bot starts requesting prices.
+    if gateway_started:
+        print("  Gateway initializing market data connections...")
+        time.sleep(15)
 
     return ib
 

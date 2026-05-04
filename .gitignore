@@ -2,3 +2,4 @@
 .env
 __pycache__/
 pending_topup.json
+.claude/

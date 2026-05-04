@@ -268,17 +268,16 @@ and logs in automatically.
 1. Download IBC from [https://github.com/IbcAlpha/IBC/releases](https://github.com/IbcAlpha/IBC/releases)
    — get the Windows release (`IBCWin_x.x.x.zip`)
 2. Extract to a permanent folder, e.g. `C:\IBC\`
-3. Copy `ibc_config.template.ini` (from this project) to `C:\IBC\config.ini` and fill in your credentials:
+3. Create `config.ini` in your IBC folder and fill in your credentials:
    ```ini
    IbLoginId=YOUR_IBKR_USERNAME
    IbPassword=YOUR_IBKR_PASSWORD
    TradingMode=live
    FIX=no
    ```
-4. Open `C:\IBC\StartIBCWin.bat` and verify the path to your IB Gateway installation is correct
-5. In `config.py`, set:
+4. In `config.py`, set:
    ```python
-   IBC_SCRIPT_PATH = r"C:\IBC\StartIBCWin.bat"
+   IBC_SCRIPT_PATH = r"C:\IBC\StartGateway.bat"
    ```
 
 ### What happens when you run the bot
@@ -300,8 +299,7 @@ The bot retries for up to ~50 seconds (10 attempts × 5 seconds).
 
 ### Security note
 
-Your IBKR credentials live in `C:\IBC\config.ini` — outside the project folder and never
-committed to git. The `ibc_config.template.ini` in this project contains only placeholders.
+Your IBKR credentials live in `config.ini` inside your IBC folder — outside the project folder and never committed to git.
 
 ---
 
