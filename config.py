@@ -13,6 +13,13 @@ IB_ENVIRONMENT = "live"  # "paper" or "live"
 EXECUTION_MODE = "execute"  # "preview" or "execute"
 
 # ------------------------------------------------------------
+# IBC AUTO-START SETTINGS
+# ------------------------------------------------------------
+# Set to the full path of StartIBCWin.bat to auto-start IB Gateway
+# when the bot cannot connect. Set to None to disable.
+IBC_SCRIPT_PATH = r"C:\IBC\StartIBCWin.bat"
+
+# ------------------------------------------------------------
 # IBKR CONNECTION SETTINGS
 # ------------------------------------------------------------
 IB_CONNECTIONS = {

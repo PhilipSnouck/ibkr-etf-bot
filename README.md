@@ -257,6 +257,54 @@ IB_ENVIRONMENT = "live"  # was "paper"
 
 ---
 
+## Automating IB Gateway Startup
+
+By default you need to open IB Gateway manually before running the bot. You can
+automate this using **IBC** (IB Controller), an open-source tool that starts Gateway
+and logs in automatically.
+
+### One-time IBC setup
+
+1. Download IBC from [https://github.com/IbcAlpha/IBC/releases](https://github.com/IbcAlpha/IBC/releases)
+   — get the Windows release (`IBCWin_x.x.x.zip`)
+2. Extract to a permanent folder, e.g. `C:\IBC\`
+3. Copy `ibc_config.template.ini` (from this project) to `C:\IBC\config.ini` and fill in your credentials:
+   ```ini
+   IbLoginId=YOUR_IBKR_USERNAME
+   IbPassword=YOUR_IBKR_PASSWORD
+   TradingMode=live
+   FIX=no
+   ```
+4. Open `C:\IBC\StartIBCWin.bat` and verify the path to your IB Gateway installation is correct
+5. In `config.py`, set:
+   ```python
+   IBC_SCRIPT_PATH = r"C:\IBC\StartIBCWin.bat"
+   ```
+
+### What happens when you run the bot
+
+If IB Gateway is already running, the bot connects immediately as normal.
+
+If Gateway is not running, the bot starts it via IBC and waits:
+
+```
+IB Gateway not running — starting via IBC...
+Approve the 2FA prompt on your phone.
+  Waiting for Gateway... (1/10)
+  Waiting for Gateway... (2/10)
+IB: connected
+```
+
+You approve the 2FA on your phone, and the bot connects automatically once Gateway is ready.
+The bot retries for up to ~50 seconds (10 attempts × 5 seconds).
+
+### Security note
+
+Your IBKR credentials live in `C:\IBC\config.ini` — outside the project folder and never
+committed to git. The `ibc_config.template.ini` in this project contains only placeholders.
+
+---
+
 ## Known Limitations
 
 - **No retry for unfilled limit orders** — if a limit order times out (2 min) and remains open at IBKR, the bot warns you and stops. Check TWS before re-running.

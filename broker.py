@@ -1,37 +1,58 @@
 # ------------------------------------------------------------
 # IMPORTS
 # ------------------------------------------------------------
+import os
+import subprocess
+import time
 from datetime import datetime, timedelta
 from math import isfinite
 from zoneinfo import ZoneInfo
 
 from ib_async import IB, Stock, LimitOrder
-from config import IB_CONNECTIONS, IB_ENVIRONMENT
+from config import IB_CONNECTIONS, IB_ENVIRONMENT, IBC_SCRIPT_PATH
 
 
 # ------------------------------------------------------------
 # CONNECT TO IBKR
 # ------------------------------------------------------------
+_MAX_CONNECT_ATTEMPTS = 10
+_CONNECT_RETRY_DELAY  = 5  # seconds
+
+
 def connect_ib():
     ib = IB()
-
     connection = IB_CONNECTIONS[IB_ENVIRONMENT]
+    gateway_started = False
 
-    try:
-        ib.connect(
-            connection["host"],
-            connection["port"],
-            clientId=connection["client_id"],
-        )
-    except Exception:
-        print(
-            f"\nCould not connect to IBKR."
-            f"\n  Environment : {IB_ENVIRONMENT}"
-            f"\n  Host        : {connection['host']}"
-            f"\n  Port        : {connection['port']}"
-            f"\n\nIs TWS or IBKR Gateway running? Is the port correct in config.py?"
-        )
-        raise SystemExit(1)
+    for attempt in range(1, _MAX_CONNECT_ATTEMPTS + 1):
+        try:
+            ib.connect(
+                connection["host"],
+                connection["port"],
+                clientId=connection["client_id"],
+            )
+            break
+        except Exception:
+            if attempt == 1 and IBC_SCRIPT_PATH:
+                if not os.path.exists(IBC_SCRIPT_PATH):
+                    print(f"\nIBC script not found at: {IBC_SCRIPT_PATH}")
+                    print("Update IBC_SCRIPT_PATH in config.py or start IB Gateway manually.")
+                    raise SystemExit(1)
+                print("IB Gateway not running — starting via IBC...")
+                subprocess.Popen(IBC_SCRIPT_PATH, shell=True)
+                gateway_started = True
+                print("Approve the 2FA prompt on your phone.")
+            elif attempt == _MAX_CONNECT_ATTEMPTS:
+                print(f"\nCould not connect to IBKR after {_MAX_CONNECT_ATTEMPTS} attempts.")
+                print(f"  Environment : {IB_ENVIRONMENT}")
+                print(f"  Host        : {connection['host']}")
+                print(f"  Port        : {connection['port']}")
+                if not gateway_started:
+                    print("\nIs IB Gateway running and logged in?")
+                raise SystemExit(1)
+            else:
+                print(f"  Waiting for Gateway... ({attempt}/{_MAX_CONNECT_ATTEMPTS})")
+            time.sleep(_CONNECT_RETRY_DELAY)
 
     # Use delayed data if live market data is unavailable
     ib.reqMarketDataType(3)
