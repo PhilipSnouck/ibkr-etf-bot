@@ -53,12 +53,6 @@ Done when: an unfilled order is re-priced and retried a bounded number of times,
 - [ ] Dynamic commission from IBKR (S)
   `order_commission_buffer` is a manual static setting. Fetch the real commission from IBKR instead of reserving a fixed EUR amount per order.
 
-- [ ] FX handling (M)
-  Bot assumes account currency matches ETF currency. Handle the case where they differ (currency conversion or cross-currency orders).
-
-- [ ] Persistent file logging (S)
-  All output currently streams to the dashboard only and is lost when the session ends. Write runs to a persistent log file for audit and debugging.
-
 ---
 
 # ✅ Done
@@ -128,8 +122,8 @@ start_dashboard.bat      # Double-click to start server + open browser
 
 ### Known limitations (current)
 - No retry for unfilled limit orders (see Next Build)
-- No persistent file logging (see Future)
-- No FX handling — assumes account currency matches ETF currency (see Future)
+- No persistent file logging
+- No FX handling — assumes account currency matches ETF currency
 - Static commission buffer, not fetched from IBKR (see Future)
 - Localhost only — phone access needs an always-on host (see Next Build)
 
