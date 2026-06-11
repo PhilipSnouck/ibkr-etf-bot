@@ -304,6 +304,24 @@ def calc_limit_price(price, markup):
 
 
 # ------------------------------------------------------------
+# TICK SIZE ROUNDING
+# ------------------------------------------------------------
+def round_up_to_tick(price: float, min_tick: float) -> float:
+    """
+    Round price UP to the nearest valid tick increment.
+    Uses Decimal arithmetic to avoid floating point precision errors (Error 110).
+    For BUY limit orders we always round up so the order has a good fill chance.
+    """
+    from decimal import Decimal, ROUND_CEILING
+    if not min_tick or min_tick <= 0:
+        return round(price, 2)
+    tick_d = Decimal(str(min_tick))
+    price_d = Decimal(str(price))
+    rounded = (price_d / tick_d).to_integral_value(rounding=ROUND_CEILING) * tick_d
+    return float(rounded)
+
+
+# ------------------------------------------------------------
 # PLACE ORDER
 # ------------------------------------------------------------
 def place_order(ib, contract, quantity, account_id, limit_price):
@@ -313,11 +331,25 @@ def place_order(ib, contract, quantity, account_id, limit_price):
     if limit_price is None or limit_price <= 0:
         raise ValueError("Limit price must be greater than 0.")
 
-    order = LimitOrder("BUY", quantity, round(limit_price, 2))
+    # Route via SMART to avoid Error 10311 (direct routing restriction in
+    # Gateway Precautionary Settings, which resets on every Gateway restart).
+    # primaryExch preserves the listing exchange so IB can identify the contract.
+    from copy import copy
+    routing_contract = copy(contract)
+    routing_contract.primaryExch = contract.exchange
+    routing_contract.exchange = "SMART"
+
+    # Snap limit price to contract's minimum tick size to avoid Error 110.
+    # We fetch details from the original (exchange-specific) contract for accuracy.
+    details = get_contract_details(ib, contract)
+    if details and details.minTick:
+        limit_price = round_up_to_tick(limit_price, details.minTick)
+
+    order = LimitOrder("BUY", quantity, limit_price)
     order.account = account_id
     order.tif = "DAY"
 
-    trade = ib.placeOrder(contract, order)
+    trade = ib.placeOrder(routing_contract, order)
     return trade
 
 

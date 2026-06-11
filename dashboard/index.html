@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IBKR ETF Bot</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+
+    header { background: #1a1a2e; color: white; padding: 18px 32px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 18px; font-weight: 600; }
+    header h1 span { color: #7c83fd; }
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    nav { display: flex; gap: 4px; }
+    nav a { color: rgba(255,255,255,0.55); text-decoration: none; font-size: 13px; font-weight: 500; padding: 7px 14px; border-radius: 7px; transition: all 0.15s; }
+    nav a:hover { color: white; background: rgba(255,255,255,0.08); }
+    nav a.active { color: white; background: rgba(124,131,253,0.25); }
+    .gateway-pill { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.7); transition: all 0.3s; }
+    .gw-dot { width: 7px; height: 7px; border-radius: 50%; background: #555; transition: all 0.3s; }
+    .gw-dot.connected { background: #4caf50; box-shadow: 0 0 6px #4caf5088; }
+    .gw-dot.error { background: #ef5350; box-shadow: 0 0 6px #ef535088; }
+
+    main { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+
+    .section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: #888; margin-bottom: 14px; }
+
+    /* Account cards */
+    .accounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .card { background: white; border-radius: 12px; border: 1px solid #e8e9ef; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; }
+    .card-title { font-size: 15px; font-weight: 600; }
+    .badge { font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 999px; background: #eef0ff; color: #5c6bc0; }
+    .badge-disabled { background: #f0f0f0; color: #aaa; }
+    .etf-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+    .etf-chip { font-size: 11px; font-weight: 500; background: #eef0ff; color: #5c6bc0; border-radius: 6px; padding: 3px 8px; }
+
+    /* Action bar */
+    .action-bar { background: white; border: 1px solid #e8e9ef; border-radius: 12px; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+    .action-bar-label { font-size: 13px; color: #666; }
+    .action-bar-label strong { color: #1a1a2e; }
+    .action-bar-label .status-text { font-size: 12px; color: #888; margin-top: 3px; }
+    .action-buttons { display: flex; gap: 10px; align-items: center; }
+
+    /* MFA banner */
+    .mfa-banner { display: none; background: #fff8e1; border: 1px solid #ffe082; border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: #7c5e00; align-items: center; gap: 10px; }
+    .mfa-banner.visible { display: flex; }
+    .mfa-banner .mfa-icon { font-size: 18px; }
+
+    /* Buttons */
+    .btn { padding: 9px 20px; border-radius: 8px; font-size: 13px; font-weight: 500; border: none; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 7px; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-preview { background: #eef0ff; color: #5c6bc0; }
+    .btn-preview:not(:disabled):hover { background: #dde0ff; }
+    .btn-execute { background: #1a1a2e; color: white; }
+    .btn-execute:not(:disabled):hover { background: #2d2d4e; }
+
+    .spinner { width: 13px; height: 13px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Results */
+    .results-section { margin-bottom: 28px; }
+    .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .toggle-log-btn { font-size: 12px; font-weight: 500; color: #888; background: white; border: 1px solid #e0e2ea; border-radius: 7px; padding: 5px 12px; cursor: pointer; transition: all 0.15s; }
+    .toggle-log-btn:hover { color: #555; border-color: #c0c3d0; }
+
+    .summary-cards { display: flex; flex-direction: column; gap: 10px; }
+    .summary-card { background: white; border: 1px solid #e8e9ef; border-left: 3px solid #7c83fd; border-radius: 12px; padding: 16px 20px; }
+    .summary-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .summary-account-name { font-size: 13px; font-weight: 600; color: #7c83fd; }
+    .status-badge { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+    .status-ok { background: #e8f5e9; color: #2e7d32; }
+    .status-running { background: #e8eaff; color: #3949ab; }
+    .status-error { background: #fce4ec; color: #c62828; }
+
+    .summary-rows { display: flex; flex-direction: column; gap: 6px; }
+    .summary-row { display: flex; align-items: center; font-size: 13px; gap: 10px; }
+    .summary-row .etf-ticker { font-weight: 600; color: #1a1a2e; width: 52px; flex-shrink: 0; }
+    .summary-row .shares { color: #5c6bc0; font-weight: 600; width: 70px; flex-shrink: 0; }
+    .summary-row .calc { color: #888; font-size: 12px; flex: 1; }
+    .summary-row .total { font-weight: 600; color: #1a1a2e; text-align: right; }
+    .summary-row .exec-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+    .filled { background: #e8f5e9; color: #2e7d32; }
+    .pending { background: #e8eaff; color: #3949ab; }
+    .cancelled { background: #fce4ec; color: #c62828; }
+
+    .topup-msgs { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+    .topup-msg { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+    .topup-msg::before { content: ''; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .topup-msg.info { color: #5c6bc0; }
+    .topup-msg.info::before { background: #5c6bc0; }
+    .topup-msg.success { color: #2e7d32; }
+    .topup-msg.success::before { background: #4caf50; }
+    .topup-msg.warning { color: #e65100; }
+    .topup-msg.warning::before { background: #ff9800; }
+
+    .summary-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f0f1f5; font-size: 12px; color: #aaa; }
+    .topup-badge { background: #fff8e1; color: #f57f17; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+
+    .empty-results { background: white; border: 1px dashed #dde0ea; border-radius: 12px; padding: 32px; text-align: center; color: #aaa; font-size: 13px; }
+
+    /* Raw log */
+    .raw-log { display: none; margin-top: 10px; background: #1a1a2e; border-radius: 12px; padding: 20px 24px; font-family: "SF Mono", "Fira Code", monospace; font-size: 12px; line-height: 1.7; color: #c9d1d9; max-height: 340px; overflow-y: auto; }
+    .raw-log.visible { display: block; }
+    .raw-log .l-account { color: #7c83fd; font-weight: 600; }
+    .raw-log .l-label { color: #58a6ff; }
+    .raw-log .l-ok { color: #56d364; }
+    .raw-log .l-warn { color: #e3b341; }
+    .raw-log .l-muted { color: #8b949e; }
+    .raw-log .l-error { color: #f85149; }
+
+    .footer-meta { font-size: 12px; color: #aaa; text-align: center; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>IBKR <span>ETF Bot</span></h1>
+  <div class="header-right">
+    <div class="gateway-pill" id="gateway-pill">
+      <span class="gw-dot" id="gw-dot"></span>
+      <span id="gw-label">Gateway</span>
+    </div>
+    <nav>
+      <a href="/" class="active">Dashboard</a>
+      <a href="/settings">Settings</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="section-label">Accounts</div>
+  <div class="accounts" id="account-cards">
+    <div style="color:#aaa;font-size:13px">Loading...</div>
+  </div>
+
+  <div class="mfa-banner" id="mfa-banner">
+    <span class="mfa-icon">📱</span>
+    <span>Approve the 2FA prompt on your <strong>IBKR Mobile</strong> app to continue.</span>
+  </div>
+
+  <div class="action-bar">
+    <div class="action-bar-label">
+      <strong id="action-label">Ready</strong>
+      <div class="status-text" id="action-status">Run a preview to see what will be bought.</div>
+    </div>
+    <div class="action-buttons">
+      <button class="btn btn-preview" id="btn-preview" onclick="runBot('preview')">
+        Preview all
+      </button>
+      <button class="btn btn-execute" id="btn-execute" disabled onclick="confirmExecute()">
+        Execute all
+      </button>
+    </div>
+  </div>
+
+  <div class="results-section">
+    <div class="results-header">
+      <div class="section-label" style="margin-bottom:0">Results</div>
+      <button class="toggle-log-btn" id="toggle-log-btn" onclick="toggleLog()" style="display:none">
+        ▼ Raw log
+      </button>
+    </div>
+    <div class="summary-cards" id="summary-cards">
+      <div class="empty-results" id="empty-results">
+        Click <strong>Preview all</strong> to calculate allocations.
+      </div>
+    </div>
+    <div class="raw-log" id="raw-log"></div>
+  </div>
+
+  <div class="footer-meta" id="footer-meta">Loading config...</div>
+</main>
+
+<script>
+  let config = null;
+  let previewOk = false;
+  let currentSource = null;
+  let logVisible = false;
+  let receivedDone = false;
+  let gatewayConnected = false;
+  let execResults = {};  // { accountName: { filled: 0, cancelled: 0 } }
+
+  // ── Bootstrap ──
+  fetch('/api/config')
+    .then(r => r.json())
+    .then(data => {
+      config = data;
+      renderCards();
+      document.getElementById('footer-meta').textContent =
+        `Environment: ${config.ib_environment} trading  ·  Mode: ${config.execution_mode}`;
+    })
+    .catch(() => {
+      document.getElementById('footer-meta').textContent = 'Could not load config.';
+    });
+
+  function renderCards() {
+    const container = document.getElementById('account-cards');
+    container.innerHTML = '';
+    for (const [name, settings] of Object.entries(config.accounts)) {
+      const etfs = Object.entries(settings.etfs)
+        .map(([ticker, cfg]) => `<span class="etf-chip">${ticker} ${Math.round(cfg.target_weight * 100)}%</span>`)
+        .join('');
+      const etfCount = Object.keys(settings.etfs).length;
+      const disabled = !settings.enabled;
+      container.innerHTML += `
+        <div class="card" style="${disabled ? 'opacity:0.5' : ''}">
+          <div class="card-header">
+            <span class="card-title">${name}</span>
+            <span class="badge ${disabled ? 'badge-disabled' : ''}">${etfCount} ETF${etfCount > 1 ? 's' : ''}</span>
+          </div>
+          <div class="etf-chips">${etfs}</div>
+        </div>`;
+    }
+  }
+
+  // ── Run bot ──
+  function runBot(mode) {
+    if (currentSource) { currentSource.close(); currentSource = null; }
+
+    setRunning(true, mode);
+    clearResults();
+    receivedDone = false;
+    execResults = {};
+
+    const es = new EventSource(`/api/run/${mode}`);
+    currentSource = es;
+
+    es.onmessage = e => handleEvent(JSON.parse(e.data), mode);
+    es.onerror = () => {
+      if (receivedDone) return;
+      setRunning(false, mode);
+      es.close();
+      currentSource = null;
+      setStatus('Connection lost — check raw log for details.', true);
+    };
+  }
+
+  function confirmExecute() {
+    if (!gatewayConnected) {
+      alert('Gateway not connected.\n\nRun a preview first to confirm the connection is live.');
+      return;
+    }
+    if (confirm('Place real orders for all accounts?\n\nThis will buy ETFs at market price.')) {
+      runBot('execute');
+    }
+  }
+
+  // ── Event handler ──
+  function handleEvent(ev, mode) {
+    switch (ev.type) {
+      case 'raw':
+        appendLog(ev.line);
+        document.getElementById('toggle-log-btn').style.display = '';
+        break;
+      case 'mfa_prompt':
+        document.getElementById('mfa-banner').classList.add('visible');
+        break;
+      case 'cash':
+        updateCashAvailable(ev);
+        break;
+      case 'account_start':
+        document.getElementById('mfa-banner').classList.remove('visible');
+        ensureCard(ev.name);
+        setGateway('connected');
+        break;
+      case 'allocation':
+        addAllocationRow(ev);
+        break;
+      case 'summary':
+        updateSummaryFooter(ev);
+        break;
+      case 'topup':
+        addTopupBadge(ev.account, ev.needed);
+        break;
+      case 'execution_result':
+        updateExecutionRow(ev);
+        break;
+      case 'topup_info':
+        addTopupMessage(ev.account, ev.level, ev.message);
+        break;
+      case 'error':
+        markError(ev.account, ev.message);
+        setGateway('error');
+        break;
+      case 'done':
+        receivedDone = true;
+        document.getElementById('mfa-banner').classList.remove('visible');
+        setRunning(false, mode);
+        currentSource.close();
+        currentSource = null;
+        if (ev.exit_code === 0 && mode === 'preview') {
+          previewOk = true;
+          document.getElementById('btn-execute').disabled = false;
+          setStatus('Preview complete — click Execute all to place orders.', false);
+          document.getElementById('action-label').textContent = 'Preview done';
+        } else if (mode === 'execute') {
+          const totalFilled = Object.values(execResults).reduce((s, r) => s + r.filled, 0);
+          const totalCancelled = Object.values(execResults).reduce((s, r) => s + r.cancelled, 0);
+          if (totalFilled > 0 && totalCancelled === 0) {
+            setStatus('All orders filled.', false);
+          } else if (totalFilled > 0) {
+            setStatus(`${totalFilled} order${totalFilled !== 1 ? 's' : ''} filled, ${totalCancelled} cancelled — check raw log.`, true);
+          } else {
+            setStatus('All orders cancelled — check raw log for details.', true);
+          }
+          document.getElementById('action-label').textContent = 'Done';
+          document.getElementById('btn-execute').disabled = true;
+        } else if (ev.exit_code !== 0) {
+          setStatus('Run finished with errors — check raw log.', true);
+        }
+        break;
+    }
+  }
+
+  // ── Summary card builders ──
+  function ensureCard(accountName) {
+    const id = cardId(accountName);
+    if (document.getElementById(id)) return;
+
+    document.getElementById('empty-results').style.display = 'none';
+    document.getElementById('toggle-log-btn').style.display = '';
+
+    const card = document.createElement('div');
+    card.className = 'summary-card';
+    card.id = id;
+    card.innerHTML = `
+      <div class="summary-card-header">
+        <span class="summary-account-name">${accountName}</span>
+        <span class="status-badge status-running" id="${id}-status">Running…</span>
+      </div>
+      <div id="${id}-cash" style="font-size:12px;color:#aaa;margin-bottom:8px;display:none">
+        Available: <strong id="${id}-cash-val" style="color:#1a1a2e"></strong>
+      </div>
+      <div class="summary-rows" id="${id}-rows"></div>
+      <div class="topup-msgs" id="${id}-topup-msgs"></div>
+      <div class="summary-footer" id="${id}-footer" style="display:none">
+        <span id="${id}-leftover"></span>
+        <span id="${id}-topup"></span>
+      </div>`;
+    document.getElementById('summary-cards').appendChild(card);
+  }
+
+  function updateCashAvailable(ev) {
+    const id = cardId(ev.account);
+    const cashEl = document.getElementById(`${id}-cash`);
+    const cashVal = document.getElementById(`${id}-cash-val`);
+    if (cashEl && cashVal) {
+      cashVal.textContent = `€ ${parseFloat(ev.amount).toLocaleString('nl-NL', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      cashEl.style.display = '';
+    }
+  }
+
+  function addAllocationRow(ev) {
+    const rowsEl = document.getElementById(`${cardId(ev.account)}-rows`);
+    if (!rowsEl) return;
+    const note = ev.note || '';
+    let noteBadge = '';
+    if (note === 'top-up pending')   noteBadge = '<span class="exec-status pending">top-up</span>';
+    else if (note === 'rounded down') noteBadge = '<span class="exec-status" style="background:#fff8e1;color:#f57f17">↓ rounded</span>';
+    else if (note === 'rounded up')   noteBadge = '<span class="exec-status" style="background:#e8f5e9;color:#2e7d32">↑ rounded</span>';
+
+    const row = document.createElement('div');
+    row.className = 'summary-row';
+    row.id = `${cardId(ev.account)}-row-${ev.symbol}`;
+    row.innerHTML = `
+      <span class="etf-ticker">${ev.symbol}</span>
+      <span class="shares">${ev.shares} share${ev.shares !== 1 ? 's' : ''}</span>
+      <span class="calc">${ev.shares} × €${ev.price.toFixed(2)}</span>
+      <span class="total">€ ${ev.total.toFixed(2)}</span>
+      ${noteBadge}`;
+    rowsEl.appendChild(row);
+  }
+
+  function updateSummaryFooter(ev) {
+    const id = cardId(ev.account);
+    const footer = document.getElementById(`${id}-footer`);
+    const leftover = document.getElementById(`${id}-leftover`);
+    const statusEl = document.getElementById(`${id}-status`);
+    if (!footer) return;
+    footer.style.display = 'flex';
+    leftover.innerHTML = `Cash remaining: <strong style="color:#1a1a2e">€ ${ev.leftover.toFixed(2)}</strong>`;
+    if (statusEl) { statusEl.textContent = '✓ Ready'; statusEl.className = 'status-badge status-ok'; }
+  }
+
+  function addTopupBadge(accountName, needed) {
+    const topupEl = document.getElementById(`${cardId(accountName)}-topup`);
+    if (!topupEl) return;
+    if (needed) {
+      topupEl.innerHTML = '<span class="topup-badge">↑ Top-up will be saved</span>';
+    } else {
+      topupEl.innerHTML = '<span style="font-size:11px;color:#aaa">No top-up needed</span>';
+    }
+  }
+
+  function updateExecutionRow(ev) {
+    const rowEl = document.getElementById(`${cardId(ev.account)}-row-${ev.symbol}`);
+    const isCancelled = ev.status.toLowerCase().includes('cancel');
+    const isFilled = ev.status === 'Filled';
+    const statusClass = isFilled ? 'filled' : isCancelled ? 'cancelled' : 'pending';
+    if (rowEl) {
+      rowEl.innerHTML = `
+        <span class="etf-ticker">${ev.symbol}</span>
+        <span class="shares">${ev.filled} share${ev.filled !== 1 ? 's' : ''}</span>
+        <span class="calc">${ev.filled} × €${ev.avg_price.toFixed(2)}</span>
+        <span class="total">€ ${ev.total.toFixed(2)}</span>
+        <span class="exec-status ${statusClass}">${ev.status}</span>`;
+    }
+    // Track per-account execution results
+    if (!execResults[ev.account]) execResults[ev.account] = { filled: 0, cancelled: 0 };
+    if (isFilled) execResults[ev.account].filled++;
+    if (isCancelled) execResults[ev.account].cancelled++;
+
+    // Update account badge — re-evaluate after every row comes in
+    const statusEl = document.getElementById(`${cardId(ev.account)}-status`);
+    if (statusEl) {
+      const r = execResults[ev.account];
+      if (r.cancelled > 0 && r.filled > 0) {
+        statusEl.textContent = '⚠ Partial';
+        statusEl.className = 'status-badge status-running';
+      } else if (r.filled > 0) {
+        statusEl.textContent = '✓ Filled';
+        statusEl.className = 'status-badge status-ok';
+      } else if (r.cancelled > 0) {
+        statusEl.textContent = '✗ Cancelled';
+        statusEl.className = 'status-badge status-error';
+      }
+    }
+  }
+
+  function addTopupMessage(accountName, level, message) {
+    const msgsEl = document.getElementById(`${cardId(accountName)}-topup-msgs`);
+    if (!msgsEl) return;
+    const div = document.createElement('div');
+    div.className = `topup-msg ${level}`;
+    div.textContent = message;
+    msgsEl.appendChild(div);
+  }
+
+  function markError(accountName, message) {
+    if (!accountName) return;
+    const id = cardId(accountName);
+    ensureCard(accountName);
+    const statusEl = document.getElementById(`${id}-status`);
+    if (statusEl) { statusEl.textContent = '✗ Error'; statusEl.className = 'status-badge status-error'; }
+    const rowsEl = document.getElementById(`${id}-rows`);
+    if (rowsEl) rowsEl.innerHTML += `<div style="font-size:12px;color:#c62828;margin-top:6px">${message}</div>`;
+  }
+
+  // ── Raw log ──
+  function appendLog(line) {
+    const log = document.getElementById('raw-log');
+    const clean = line.replace(/\x1B\[[0-9;]*m/g, '');
+    const div = document.createElement('div');
+
+    if (clean.includes('ACCOUNT:')) div.className = 'l-account';
+    else if (clean.includes('Safety stop') || clean.includes('Error')) div.className = 'l-error';
+    else if (clean.includes('Warning') || clean.includes('⚠')) div.className = 'l-warn';
+    else if (clean.includes('✓') || clean.includes('Filled')) div.className = 'l-ok';
+    else if (clean.startsWith('  ') || clean.includes('|')) div.className = 'l-label';
+    else div.className = 'l-muted';
+
+    div.textContent = clean || ' ';
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function toggleLog() {
+    logVisible = !logVisible;
+    document.getElementById('raw-log').classList.toggle('visible', logVisible);
+    document.getElementById('toggle-log-btn').textContent = logVisible ? '▲ Hide raw log' : '▼ Raw log';
+  }
+
+  // ── UI state ──
+  function setGateway(state) {
+    const dot = document.getElementById('gw-dot');
+    const label = document.getElementById('gw-label');
+    dot.className = 'gw-dot';
+    if (state === 'connected') {
+      dot.classList.add('connected');
+      label.textContent = 'Gateway connected';
+      gatewayConnected = true;
+    } else if (state === 'error') {
+      dot.classList.add('error');
+      label.textContent = 'Gateway error';
+      gatewayConnected = false;
+    } else {
+      label.textContent = 'Gateway';
+      gatewayConnected = false;
+    }
+  }
+
+  function setRunning(running, mode) {
+    const btnPreview = document.getElementById('btn-preview');
+    const btnExecute = document.getElementById('btn-execute');
+    btnPreview.disabled = running;
+    if (running) {
+      if (mode === 'preview') setGateway('idle');
+      btnExecute.disabled = true;
+      const label = mode === 'execute' ? 'Executing…' : 'Running preview…';
+      btnPreview.innerHTML = `<span class="spinner"></span> ${mode === 'preview' ? 'Running…' : 'Preview all'}`;
+      if (mode === 'execute') btnExecute.innerHTML = `<span class="spinner"></span> Executing…`;
+      setStatus(label, false);
+      document.getElementById('action-label').textContent = mode === 'execute' ? 'Executing' : 'Previewing';
+    } else {
+      btnPreview.innerHTML = 'Preview all';
+      btnExecute.innerHTML = 'Execute all';
+    }
+  }
+
+  function clearResults() {
+    const cards = document.getElementById('summary-cards');
+    cards.innerHTML = '<div class="empty-results" id="empty-results" style="display:none"></div>';
+    document.getElementById('raw-log').innerHTML = '';
+    document.getElementById('toggle-log-btn').style.display = 'none';
+    if (logVisible) { logVisible = false; document.getElementById('raw-log').classList.remove('visible'); }
+  }
+
+  function setStatus(text, isError) {
+    const el = document.getElementById('action-status');
+    el.textContent = text;
+    el.style.color = isError ? '#c62828' : '#888';
+  }
+
+  function cardId(name) {
+    return 'card-' + name.replace(/\s+/g, '-').toLowerCase();
+  }
+
+  // ── Shutdown Gateway on window close (but not on internal navigation) ──
+  document.querySelectorAll('nav a').forEach(a => {
+    a.addEventListener('click', () => { window.__internalNav = true; });
+  });
+  window.addEventListener('beforeunload', () => {
+    if (window.__internalNav) return;
+    navigator.sendBeacon('/api/shutdown');
+  });
+</script>
+</body>
+</html>

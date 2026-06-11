@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — IBKR ETF Bot</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+
+    header { background: #1a1a2e; color: white; padding: 18px 32px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 18px; font-weight: 600; }
+    header h1 span { color: #7c83fd; }
+    nav { display: flex; gap: 4px; }
+    nav a { color: rgba(255,255,255,0.55); text-decoration: none; font-size: 13px; font-weight: 500; padding: 7px 14px; border-radius: 7px; transition: all 0.15s; }
+    nav a:hover { color: white; background: rgba(255,255,255,0.08); }
+    nav a.active { color: white; background: rgba(124,131,253,0.25); }
+
+    main { max-width: 860px; margin: 0 auto; padding: 32px 24px; display: flex; flex-direction: column; gap: 28px; }
+
+    .section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: #888; margin-bottom: 14px; }
+
+    .card { background: white; border: 1px solid #e8e9ef; border-radius: 12px; overflow: hidden; }
+    .card-section { padding: 20px 24px; border-bottom: 1px solid #f0f1f5; }
+    .card-section:last-child { border-bottom: none; }
+    .card-section-title { font-size: 13px; font-weight: 600; color: #1a1a2e; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    .card-section-title .pill { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: #f0f1f7; color: #666; }
+
+    .form-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f5f5f8; }
+    .form-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .form-row:first-child { padding-top: 0; }
+    .form-label { font-size: 13px; color: #333; }
+    .form-label .hint { display: block; font-size: 11px; color: #aaa; margin-top: 2px; }
+
+    input[type="text"], input[type="number"], select {
+      border: 1px solid #dde0ea; border-radius: 7px; padding: 7px 10px; font-size: 13px;
+      color: #1a1a2e; background: white; min-width: 130px; outline: none; transition: border 0.15s;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus { border-color: #7c83fd; }
+    input[type="number"] { max-width: 120px; }
+
+    .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; inset: 0; background: #dde0ea; border-radius: 999px; cursor: pointer; transition: background 0.2s; }
+    .slider:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    input:checked + .slider { background: #7c83fd; }
+    input:checked + .slider:before { transform: translateX(18px); }
+
+    .segment { display: flex; background: #f0f1f7; border-radius: 8px; padding: 3px; gap: 2px; }
+    .segment button { border: none; background: none; padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; color: #888; transition: all 0.15s; }
+    .segment button.active { background: white; color: #1a1a2e; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    .segment button.active.live { background: #fff0f0; color: #d32f2f; }
+
+    .account-tabs { display: flex; gap: 4px; padding: 16px 24px 0; border-bottom: 1px solid #f0f1f5; overflow-x: auto; }
+    .account-tab { padding: 8px 16px; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 500; cursor: pointer; color: #888; border: 1px solid transparent; border-bottom: none; background: none; transition: all 0.15s; margin-bottom: -1px; white-space: nowrap; }
+    .account-tab.active { background: white; color: #1a1a2e; border-color: #e8e9ef; border-bottom-color: white; }
+
+    .account-panel { display: none; }
+    .account-panel.active { display: block; }
+
+    .etf-table { width: 100%; border-collapse: collapse; }
+    .etf-table th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: #aaa; padding: 0 0 10px 0; }
+    .etf-table th:not(:first-child) { text-align: right; }
+    .etf-table td { padding: 8px 0; font-size: 13px; border-top: 1px solid #f5f5f8; vertical-align: middle; }
+    .etf-table td:not(:first-child) { text-align: right; }
+    .etf-table input[type="number"] { min-width: 70px; max-width: 80px; text-align: right; }
+    .etf-table input[type="text"] { min-width: 70px; max-width: 90px; }
+    .weight-total { font-size: 12px; color: #888; text-align: right; padding-top: 10px; }
+    .weight-total strong { color: #56d364; }
+    .weight-total.over strong { color: #e53935; }
+
+    .save-bar { background: white; border-top: 1px solid #e8e9ef; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .save-bar p { font-size: 12px; color: #aaa; }
+    .save-bar p.dirty { color: #e3b341; font-weight: 500; }
+    .save-bar p.saved { color: #2e7d32; font-weight: 500; }
+    .save-bar p.error { color: #c62828; font-weight: 500; }
+    .btn-save { background: #1a1a2e; color: white; border: none; padding: 9px 24px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; }
+    .btn-save:hover { background: #2d2d4e; }
+    .btn-discard { background: none; border: 1px solid #dde0ea; color: #555; padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; margin-right: 8px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>IBKR <span>ETF Bot</span></h1>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/settings" class="active">Settings</a>
+  </nav>
+</header>
+
+<main id="main">
+  <div style="color:#aaa;font-size:13px;padding:20px 0">Loading settings...</div>
+</main>
+
+<script>
+  let config = null;
+  let dirty = false;
+  let activeAccount = null;
+
+  fetch('/api/config')
+    .then(r => r.json())
+    .then(data => { config = data; render(); })
+    .catch(() => {
+      document.getElementById('main').innerHTML = '<div style="color:#c62828;font-size:13px">Could not load config from server.</div>';
+    });
+
+  function render() {
+    const main = document.getElementById('main');
+    const accountNames = Object.keys(config.accounts);
+    if (!activeAccount) activeAccount = accountNames[0];
+
+    main.innerHTML = `
+      <!-- Global -->
+      <div>
+        <div class="section-label">Global</div>
+        <div class="card">
+          <div class="card-section">
+            <div class="form-row">
+              <div class="form-label">Environment <span class="hint">Switch between paper and live trading</span></div>
+              <div class="segment" id="seg-env">
+                <button onclick="setEnv('paper')" class="${config.ib_environment === 'paper' ? 'active' : ''}">Paper</button>
+                <button onclick="setEnv('live')" class="${config.ib_environment === 'live' ? 'active live' : ''}">Live</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-label">Default execution mode <span class="hint">Whether Execute button places real orders</span></div>
+              <select onchange="setField('execution_mode', this.value)">
+                <option value="preview" ${config.execution_mode === 'preview' ? 'selected' : ''}>Preview only</option>
+                <option value="execute" ${config.execution_mode === 'execute' ? 'selected' : ''}>Execute</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <div class="form-label">Commission buffer per order <span class="hint">Cash reserved per limit order placed (EUR)</span></div>
+              <input type="number" value="${config.order_commission_buffer}" step="0.25" min="0"
+                     onchange="setField('order_commission_buffer', parseFloat(this.value))" />
+            </div>
+            <div class="form-row">
+              <div class="form-label">Max pending top-up age <span class="hint">Days before a pending file is discarded</span></div>
+              <input type="number" value="${config.max_pending_topup_age_days}" step="1" min="1"
+                     onchange="setField('max_pending_topup_age_days', parseInt(this.value))" />
+            </div>
+            <div class="form-row">
+              <div class="form-label">IBC script path <span class="hint">Full path to StartGateway.bat</span></div>
+              <input type="text" value="${config.ibc_script_path}" style="min-width:320px"
+                     onchange="setField('ibc_script_path', this.value)" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Accounts -->
+      <div>
+        <div class="section-label">Accounts</div>
+        <div class="card">
+          <div class="account-tabs">
+            ${accountNames.map(name => `
+              <button class="account-tab ${name === activeAccount ? 'active' : ''}"
+                      onclick="switchTab('${name}')">${name}</button>
+            `).join('')}
+          </div>
+          ${accountNames.map(name => renderAccountPanel(name)).join('')}
+          <div class="save-bar">
+            <p id="save-status">All changes saved.</p>
+            <div>
+              <button class="btn-discard" onclick="discardChanges()">Discard</button>
+              <button class="btn-save" onclick="saveConfig()">Save settings</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderAccountPanel(name) {
+    const s = config.accounts[name];
+    const etfRows = Object.entries(s.etfs).map(([ticker, etf]) => `
+      <tr>
+        <td><input type="text" value="${ticker}" style="font-weight:600;max-width:70px"
+                   onchange="renameEtf('${name}', '${ticker}', this.value)" /></td>
+        <td><input type="text" value="${etf.exchange || ''}" style="max-width:90px"
+                   onchange="setEtfField('${name}', '${ticker}', 'exchange', this.value)" /></td>
+        <td><input type="text" value="${etf.currency || 'EUR'}" style="max-width:70px"
+                   onchange="setEtfField('${name}', '${ticker}', 'currency', this.value)" /></td>
+        <td><input type="number" value="${Math.round(etf.target_weight * 100)}" min="0" max="100"
+                   onchange="setEtfWeight('${name}', '${ticker}', this.value)" /></td>
+      </tr>`).join('');
+
+    const totalWeight = Math.round(
+      Object.values(s.etfs).reduce((sum, e) => sum + e.target_weight * 100, 0)
+    );
+
+    return `
+      <div class="account-panel ${name === activeAccount ? 'active' : ''}" id="panel-${sanitize(name)}">
+        <div class="card-section">
+          <div class="card-section-title">General</div>
+          <div class="form-row">
+            <div class="form-label">Account enabled</div>
+            <label class="toggle">
+              <input type="checkbox" ${s.enabled ? 'checked' : ''}
+                     onchange="setAccountField('${name}', 'enabled', this.checked)" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="form-row">
+            <div class="form-label">Planned allocation cap <span class="hint">Leave blank to use all available cash</span></div>
+            <input type="number" value="${s.planned_allocation_cash ?? ''}" placeholder="No cap" min="0"
+                   onchange="setAccountField('${name}', 'planned_allocation_cash', this.value ? parseFloat(this.value) : null)" />
+          </div>
+          <div class="form-row">
+            <div class="form-label">Limit order markup <span class="hint">% above last price (e.g. 0.5 = 0.5%)</span></div>
+            <input type="number" value="${(s.limit_order_markup * 100).toFixed(1)}" step="0.1" min="0" max="5"
+                   onchange="setAccountField('${name}', 'limit_order_markup', parseFloat(this.value) / 100)" />
+          </div>
+          <div class="form-row">
+            <div class="form-label">Minimum cash to execute <span class="hint">Skip account if cash is below this</span></div>
+            <input type="number" value="${s.rules.min_cash_to_execute}" step="50" min="0"
+                   onchange="setRuleField('${name}', 'min_cash_to_execute', parseFloat(this.value))" />
+          </div>
+        </div>
+        <div class="card-section">
+          <div class="card-section-title">Pending top-up <span class="pill">Fractional share handling</span></div>
+          <div class="form-row">
+            <div class="form-label">Enable pending top-up</div>
+            <label class="toggle">
+              <input type="checkbox" ${s.rules.pending_topup_enabled ? 'checked' : ''}
+                     onchange="setRuleField('${name}', 'pending_topup_enabled', this.checked)" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="form-row">
+            <div class="form-label">Top-up trigger threshold <span class="hint">Save pending file if fractional part ≥ this (0–1)</span></div>
+            <input type="number" value="${s.rules.topup_trigger}" step="0.05" min="0" max="1"
+                   onchange="setRuleField('${name}', 'topup_trigger', parseFloat(this.value))" />
+          </div>
+        </div>
+        <div class="card-section">
+          <div class="card-section-title">ETF allocation</div>
+          <table class="etf-table">
+            <thead><tr><th>Ticker</th><th style="text-align:right">Exchange</th><th style="text-align:right">Currency</th><th style="text-align:right">Weight %</th></tr></thead>
+            <tbody id="etf-rows-${sanitize(name)}">${etfRows}</tbody>
+          </table>
+          <div class="weight-total ${totalWeight !== 100 ? 'over' : ''}" id="weight-total-${sanitize(name)}">
+            Total: <strong>${totalWeight}%</strong>${totalWeight !== 100 ? ' ⚠ must equal 100%' : ''}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ── Tab switching ──
+  function switchTab(name) {
+    activeAccount = name;
+    document.querySelectorAll('.account-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.account-panel').forEach(p => p.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById(`panel-${sanitize(name)}`).classList.add('active');
+  }
+
+  // ── Setters ──
+  function setEnv(val) {
+    config.ib_environment = val;
+    markDirty();
+    document.querySelectorAll('#seg-env button').forEach((b, i) => {
+      const env = i === 0 ? 'paper' : 'live';
+      b.className = val === env ? `active${env === 'live' ? ' live' : ''}` : '';
+    });
+  }
+
+  function setField(key, val) { config[key] = val; markDirty(); }
+
+  function setAccountField(name, key, val) { config.accounts[name][key] = val; markDirty(); }
+
+  function setRuleField(name, key, val) { config.accounts[name].rules[key] = val; markDirty(); }
+
+  function setEtfField(name, ticker, key, val) { config.accounts[name].etfs[ticker][key] = val; markDirty(); }
+
+  function setEtfWeight(name, ticker, val) {
+    config.accounts[name].etfs[ticker].target_weight = parseFloat(val) / 100;
+    markDirty();
+    refreshWeightTotal(name);
+  }
+
+  function renameEtf(name, oldTicker, newTicker) {
+    if (oldTicker === newTicker) return;
+    const etfs = config.accounts[name].etfs;
+    const rebuilt = {};
+    for (const [k, v] of Object.entries(etfs)) {
+      rebuilt[k === oldTicker ? newTicker : k] = v;
+    }
+    config.accounts[name].etfs = rebuilt;
+    markDirty();
+  }
+
+  function refreshWeightTotal(name) {
+    const total = Math.round(
+      Object.values(config.accounts[name].etfs).reduce((s, e) => s + e.target_weight * 100, 0)
+    );
+    const el = document.getElementById(`weight-total-${sanitize(name)}`);
+    if (el) {
+      el.className = `weight-total${total !== 100 ? ' over' : ''}`;
+      el.innerHTML = `Total: <strong>${total}%</strong>${total !== 100 ? ' ⚠ must equal 100%' : ''}`;
+    }
+  }
+
+  // ── Save / discard ──
+  function markDirty() {
+    dirty = true;
+    const el = document.getElementById('save-status');
+    if (el) { el.textContent = 'Unsaved changes.'; el.className = 'dirty'; }
+  }
+
+  function discardChanges() {
+    fetch('/api/config').then(r => r.json()).then(data => {
+      config = data;
+      dirty = false;
+      render();
+    });
+  }
+
+  function saveConfig() {
+    fetch('/api/config', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(config)
+    })
+    .then(r => r.json())
+    .then(() => {
+      dirty = false;
+      const el = document.getElementById('save-status');
+      if (el) { el.textContent = 'Saved.'; el.className = 'saved'; }
+    })
+    .catch(() => {
+      const el = document.getElementById('save-status');
+      if (el) { el.textContent = 'Save failed — check server.'; el.className = 'error'; }
+    });
+  }
+
+  function sanitize(name) {
+    return name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '').toLowerCase();
+  }
+
+  // ── Shutdown Gateway on window close (but not on internal navigation) ──
+  document.querySelectorAll('nav a').forEach(a => {
+    a.addEventListener('click', () => { window.__internalNav = true; });
+  });
+  window.addEventListener('beforeunload', () => {
+    if (window.__internalNav) return;
+    navigator.sendBeacon('/api/shutdown');
+  });
+</script>
+</body>
+</html>

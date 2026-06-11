@@ -2,4 +2,6 @@
 .env
 __pycache__/
 pending_topup.json
+pending_topup_*.json
+config_store.json
 .claude/
