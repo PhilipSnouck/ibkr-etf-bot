@@ -13,7 +13,7 @@ Usage instructions live in `README.md`; tasks in `ROADMAP.md`.
 ## Repo & location
 
 - **GitHub:** https://github.com/PhilipSnouck/ibkr-etf-bot (private)
-- **Local:** `C:\Users\p.snouckaert\Own AI projects\IBKR-bot-docs\IBKR-etf-bot`
+- **Local:** `C:\Users\p.snouckaert\Personal repos\IBKR-bot-docs\IBKR-etf-bot`
 - **Runs:** localhost only, on Philip's laptop. No deploy pipeline.
 
 **Folder quirk (intentional — never "fix"):** the git repo is this `IBKR-etf-bot`

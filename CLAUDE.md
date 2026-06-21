@@ -15,4 +15,4 @@ http://localhost:8000. Requires IB Gateway (auto-started via IBC) + phone MFA ap
 
 ## Pointers
 - `README.md` — usage · `DEVELOPER.md` — architecture and internals
-- `ROADMAP.md` — tasks. Format spec: `C:\Users\p.snouckaert\Own AI projects\roadmap-dashboard\ROADMAP_TEMPLATE.md`. Always `git pull` before editing it.
+- `ROADMAP.md` — tasks. Format spec: `C:\Users\p.snouckaert\Personal repos\roadmap-dashboard\ROADMAP_TEMPLATE.md`. Always `git pull` before editing it.

@@ -6,7 +6,7 @@ Built with Python 3.10+, FastAPI + SSE, ib_insync, IBC for Gateway login. Runs l
 
 - **Live:** localhost only (laptop)
 - **GitHub:** https://github.com/PhilipSnouck/ibkr-etf-bot
-- **Local:** `C:\Users\p.snouckaert\Own AI projects\IBKR-bot-docs\IBKR-etf-bot`
+- **Local:** `C:\Users\p.snouckaert\Personal repos\IBKR-bot-docs\IBKR-etf-bot`
 
 ---
 
