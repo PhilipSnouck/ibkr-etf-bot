@@ -54,7 +54,7 @@ allocator_otto.py       1-ETF, same as joint
 pending_topup.py        Load/save/clear/expire pending_topup_{account}.json files
 dashboard/index.html    Main UI: account cards, Preview/Execute buttons, SSE consumer, raw log
 dashboard/settings.html UI editor for config_store.json
-start_dashboard.bat     cd to repo, start `uvicorn server:app --port 9000`, open http://localhost:9000
+start_dashboard.bat     cd to repo, start `python -m uvicorn server:app --port 9000`, open http://localhost:9000
 ```
 
 ---
@@ -135,7 +135,7 @@ Per-account keys (from `main.py`/`rules.py`): `enabled`, `allocator`, `currency`
 ## Running it
 
 1. Double-click the **IBKR ETF Bot** desktop shortcut (or `start_dashboard.bat`):
-   starts `uvicorn server:app --port 9000` in a cmd window and opens http://localhost:9000.
+   starts `python -m uvicorn server:app --port 9000` in a cmd window and opens http://localhost:9000.
 2. Click **Preview all** — if Gateway isn't running, IBC starts it; approve MFA on phone
    (connect retries ~10 × 5 s, plus 15 s market-data warm-up after a fresh start).
 3. Click **Execute all** (only enabled after a clean preview + green Gateway indicator).
@@ -147,8 +147,7 @@ Server lives only while the cmd window is open. No tests, no linter, no CI.
 
 ## Gotchas
 
-- `README.md` says `pip install -r requirements.txt` but **there is no requirements.txt
-  in the repo** — deps are installed globally on this laptop (`fastapi`, `uvicorn`, `ib_async`).
+- Deps are installed **globally** (no venv): `fastapi`, `uvicorn`, `ib_async`, pinned in `requirements.txt`. A Python upgrade or reinstall wipes them; the symptom is the launcher window flashing `No module named uvicorn` and the browser showing `ERR_CONNECTION_REFUSED`. Recover with `python -m pip install -r requirements.txt`. The launcher calls `python -m uvicorn` (not bare `uvicorn`) so it still works when Python's Scripts dir is not on PATH.
 - There is **no double-run guard**: re-running Execute after a timeout can double-buy if
   the earlier order is still open (open orders don't reduce reported cash). The planned
   retry feature in ROADMAP.md must confirm cancellation before re-placing.

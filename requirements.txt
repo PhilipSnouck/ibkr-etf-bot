@@ -1,0 +1,5 @@
+# IBKR ETF Bot - Python dependencies (installed globally, no venv; see DEVELOPER.md).
+# Recover after a Python upgrade/reinstall with:  python -m pip install -r requirements.txt
+fastapi==0.138.2
+uvicorn==0.49.0
+ib_async==2.1.0
