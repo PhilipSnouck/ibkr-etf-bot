@@ -134,5 +134,5 @@ Live Gateway `4001`, paper `4002`. API access must be enabled in Gateway setting
 ```bash
 pip install -r requirements.txt
 # Double-click "IBKR ETF Bot" desktop shortcut (or run start_dashboard.bat)
-# Opens http://localhost:8000 — Preview → Execute
+# Opens http://localhost:9000 — Preview → Execute
 ```

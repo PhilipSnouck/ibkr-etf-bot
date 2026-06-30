@@ -54,7 +54,7 @@ allocator_otto.py       1-ETF, same as joint
 pending_topup.py        Load/save/clear/expire pending_topup_{account}.json files
 dashboard/index.html    Main UI: account cards, Preview/Execute buttons, SSE consumer, raw log
 dashboard/settings.html UI editor for config_store.json
-start_dashboard.bat     cd to repo, start `uvicorn server:app`, open http://localhost:8000
+start_dashboard.bat     cd to repo, start `uvicorn server:app --port 9000`, open http://localhost:9000
 ```
 
 ---
@@ -135,7 +135,7 @@ Per-account keys (from `main.py`/`rules.py`): `enabled`, `allocator`, `currency`
 ## Running it
 
 1. Double-click the **IBKR ETF Bot** desktop shortcut (or `start_dashboard.bat`):
-   starts `uvicorn server:app` in a cmd window and opens http://localhost:8000.
+   starts `uvicorn server:app --port 9000` in a cmd window and opens http://localhost:9000.
 2. Click **Preview all** — if Gateway isn't running, IBC starts it; approve MFA on phone
    (connect retries ~10 × 5 s, plus 15 s market-data warm-up after a fresh start).
 3. Click **Execute all** (only enabled after a clean preview + green Gateway indicator).

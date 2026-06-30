@@ -93,7 +93,7 @@ pip install -r requirements.txt
 
 Double-click **IBKR ETF Bot** on your desktop (or run `start_dashboard.bat`).
 
-This opens a small terminal window running the server and automatically opens **http://localhost:8000** in your browser.
+This opens a small terminal window running the server and automatically opens **http://localhost:9000** in your browser.
 
 The server only runs while that terminal window is open. When you close the browser tab, IB Gateway is automatically shut down.
 
@@ -101,7 +101,7 @@ The server only runs while that terminal window is open. When you close the brow
 
 ## Using the Dashboard
 
-### Dashboard (http://localhost:8000)
+### Dashboard (http://localhost:9000)
 
 **Accounts panel** — shows all configured accounts with their ETFs and target weights.
 
@@ -115,7 +115,7 @@ The server only runs while that terminal window is open. When you close the brow
 
 **Raw log toggle** — shows the full bot console output for debugging.
 
-### Settings (http://localhost:8000/settings)
+### Settings (http://localhost:9000/settings)
 
 Edit all configuration without touching code:
 
