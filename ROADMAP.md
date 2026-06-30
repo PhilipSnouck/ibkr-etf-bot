@@ -86,7 +86,7 @@ Done when: an unfilled order is re-priced and retried a bounded number of times,
 - [x] Execute all — enabled after successful preview, gated on green Gateway indicator
 - [x] Raw log toggle for debugging
 - [x] Settings page — edit all config without touching code
-- [x] `start_dashboard.bat` desktop shortcut launches server + opens browser
+- [x] `IBKR_dashboard.bat` desktop shortcut launches server + opens browser
 
 ## IBC / Gateway integration (M)
 - [x] Auto-start IB Gateway via IBC when not already running
@@ -117,7 +117,7 @@ config_store.json        # Single source of truth for all settings
 allocator_*.py           # Strategy functions + registry
 pending_topup.py         # Persistent state for incomplete trades
 dashboard/               # index.html (preview+execute) + settings.html
-start_dashboard.bat      # Double-click to start server + open browser
+IBKR_dashboard.bat      # Double-click to start server + open browser
 ```
 
 ### Known limitations (current)
@@ -133,6 +133,6 @@ Live Gateway `4001`, paper `4002`. API access must be enabled in Gateway setting
 ### Deploy / run flow
 ```bash
 pip install -r requirements.txt
-# Double-click "IBKR ETF Bot" desktop shortcut (or run start_dashboard.bat)
+# Double-click "IBKR ETF Bot" desktop shortcut (or run IBKR_dashboard.bat)
 # Opens http://localhost:9000 — Preview → Execute
 ```

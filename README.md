@@ -56,7 +56,7 @@ dashboard/
   index.html             # Main dashboard (preview + execute)
   settings.html          # Settings editor
 
-start_dashboard.bat      # Double-click to start the server + open browser
+IBKR_dashboard.bat      # Double-click to start the server + open browser
 ```
 
 The logic is intentionally split:
@@ -91,7 +91,7 @@ pip install -r requirements.txt
 
 ## Starting the Dashboard
 
-Double-click **IBKR ETF Bot** on your desktop (or run `start_dashboard.bat`).
+Double-click **IBKR ETF Bot** on your desktop (or run `IBKR_dashboard.bat`).
 
 This opens a small terminal window running the server and automatically opens **http://localhost:9000** in your browser.
 

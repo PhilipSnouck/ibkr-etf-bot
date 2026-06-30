@@ -3,7 +3,7 @@
 Personal Python bot that automates periodic ETF purchases across Philip's Interactive Brokers
 accounts, run manually via a local web dashboard: Preview → Execute.
 
-**Run:** double-click `start_dashboard.bat` (or the "IBKR ETF Bot" desktop shortcut) → opens
+**Run:** double-click `IBKR_dashboard.bat` (or the "IBKR ETF Bot" desktop shortcut) → opens
 http://localhost:9000. Requires IB Gateway (auto-started via IBC) + phone MFA approval.
 
 ## Hard rules
