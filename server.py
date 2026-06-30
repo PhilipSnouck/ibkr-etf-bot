@@ -85,6 +85,17 @@ def parse_line(line: str, state: dict) -> list:
         events.append({"type": "account_start", "name": state["account"]})
         return events
 
+    # Execution-phase header: "Executing account: Pension". The execution
+    # summary uses this header (not "ACCOUNT:"), so switch the active account
+    # here too; otherwise fills get attributed to the last preview account
+    # and that card never flips to "Filled".
+    m = re.match(r"Executing account:\s+(.+)", clean)
+    if m:
+        state["account"] = m.group(1).strip()
+        state["in_preview"] = False
+        state["in_exec"] = False
+        return events
+
     acc = state.get("account")
 
     # Usable cash line: "Pension usable cash for this run: EUR 1240.00"
