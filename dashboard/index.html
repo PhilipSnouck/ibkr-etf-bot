@@ -180,6 +180,7 @@
   let receivedDone = false;
   let gatewayConnected = false;
   let execResults = {};  // { accountName: { filled: 0, cancelled: 0 } }
+  let topupAmounts = {};  // { accountName: euroAmount } for pending top-ups
 
   // ── Bootstrap ──
   fetch('/api/config')
@@ -222,6 +223,7 @@
     clearResults();
     receivedDone = false;
     execResults = {};
+    topupAmounts = {};
 
     const es = new EventSource(`/api/run/${mode}`);
     currentSource = es;
@@ -232,7 +234,7 @@
       setRunning(false, mode);
       es.close();
       currentSource = null;
-      setStatus('Connection lost — check raw log for details.', true);
+      setStatus('Connection lost - check raw log for details.', true);
     };
   }
 
@@ -273,6 +275,9 @@
       case 'topup':
         addTopupBadge(ev.account, ev.needed);
         break;
+      case 'topup_amount':
+        setTopupAmount(ev.account, ev.amount);
+        break;
       case 'execution_result':
         updateExecutionRow(ev);
         break;
@@ -292,7 +297,7 @@
         if (ev.exit_code === 0 && mode === 'preview') {
           previewOk = true;
           document.getElementById('btn-execute').disabled = false;
-          setStatus('Preview complete — click Execute all to place orders.', false);
+          setStatus('Preview complete - click Execute all to place orders.', false);
           document.getElementById('action-label').textContent = 'Preview done';
         } else if (mode === 'execute') {
           const totalFilled = Object.values(execResults).reduce((s, r) => s + r.filled, 0);
@@ -300,14 +305,14 @@
           if (totalFilled > 0 && totalCancelled === 0) {
             setStatus('All orders filled.', false);
           } else if (totalFilled > 0) {
-            setStatus(`${totalFilled} order${totalFilled !== 1 ? 's' : ''} filled, ${totalCancelled} cancelled — check raw log.`, true);
+            setStatus(`${totalFilled} order${totalFilled !== 1 ? 's' : ''} filled, ${totalCancelled} cancelled - check raw log.`, true);
           } else {
-            setStatus('All orders cancelled — check raw log for details.', true);
+            setStatus('All orders cancelled - check raw log for details.', true);
           }
           document.getElementById('action-label').textContent = 'Done';
           document.getElementById('btn-execute').disabled = true;
         } else if (ev.exit_code !== 0) {
-          setStatus('Run finished with errors — check raw log.', true);
+          setStatus('Run finished with errors - check raw log.', true);
         }
         break;
     }
@@ -387,9 +392,22 @@
     const topupEl = document.getElementById(`${cardId(accountName)}-topup`);
     if (!topupEl) return;
     if (needed) {
-      topupEl.innerHTML = '<span class="topup-badge">↑ Top-up will be saved</span>';
+      const amt = topupAmounts[accountName];
+      const amtText = (amt != null)
+        ? ` € ${amt.toLocaleString('nl-NL', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+        : '';
+      topupEl.innerHTML = `<span class="topup-badge">↑ Top-up${amtText} will be saved</span>`;
     } else {
       topupEl.innerHTML = '<span style="font-size:11px;color:#aaa">No top-up needed</span>';
+    }
+  }
+
+  function setTopupAmount(accountName, amount) {
+    topupAmounts[accountName] = amount;
+    // If the top-up badge is already shown, re-render it so the euro amount appears.
+    const topupEl = document.getElementById(`${cardId(accountName)}-topup`);
+    if (topupEl && topupEl.querySelector('.topup-badge')) {
+      addTopupBadge(accountName, true);
     }
   }
 
@@ -411,7 +429,7 @@
     if (isFilled) execResults[ev.account].filled++;
     if (isCancelled) execResults[ev.account].cancelled++;
 
-    // Update account badge — re-evaluate after every row comes in
+    // Update account badge - re-evaluate after every row comes in
     const statusEl = document.getElementById(`${cardId(ev.account)}-status`);
     if (statusEl) {
       const r = execResults[ev.account];

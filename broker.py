@@ -44,7 +44,7 @@ def connect_ib():
                     print(f"\nIBC script not found at: {IBC_SCRIPT_PATH}")
                     print("Update IBC_SCRIPT_PATH in config.py or start IB Gateway manually.")
                     raise SystemExit(1)
-                print("IB Gateway not running — starting via IBC...")
+                print("IB Gateway not running - starting via IBC...")
                 subprocess.Popen(IBC_SCRIPT_PATH, shell=True)
                 gateway_started = True
                 print("Approve the 2FA prompt on your phone.")
@@ -321,6 +321,62 @@ def round_up_to_tick(price: float, min_tick: float) -> float:
     return float(rounded)
 
 
+def get_price_increment(ib, contract, price):
+    """
+    Return the exact tick size IBKR enforces for this contract AT THIS PRICE.
+
+    European venues use MiFID II price bands: the valid tick grows with the
+    price (e.g. EUR 0.01 below EUR 50, EUR 0.02 around EUR 100, ...). The
+    contract's `minTick` reports only the smallest possible tick (usually
+    EUR 0.01), so rounding to minTick alone still produces prices IBKR rejects
+    with Error 110. We therefore read the contract's market rule, which lists
+    the increment per price band, and return the increment for the band the
+    price falls into.
+
+    Falls back to `minTick`, then to EUR 0.01, if the market rule can't be
+    read, so this can never make order placement worse than before.
+    """
+    details = get_contract_details(ib, contract)
+
+    fallback = 0.01
+    if details and details.minTick:
+        fallback = details.minTick
+
+    if not details or not details.marketRuleIds or not details.validExchanges:
+        return fallback
+
+    exchanges = [e.strip() for e in details.validExchanges.split(",")]
+    rule_ids = [r.strip() for r in str(details.marketRuleIds).split(",")]
+    rule_map = dict(zip(exchanges, rule_ids))
+
+    # Prefer the listing (primary) exchange, where the tick band is enforced.
+    preferred = getattr(contract, "primaryExchange", "") or getattr(contract, "exchange", "")
+    rule_id = rule_map.get(preferred) or (rule_ids[0] if rule_ids else None)
+    if not rule_id:
+        return fallback
+
+    try:
+        increments = ib.reqMarketRule(int(rule_id))
+    except Exception:
+        return fallback
+
+    if not increments:
+        return fallback
+
+    # Walk the bands low-to-high and keep the increment of the highest band
+    # whose lowEdge is still at or below our price.
+    applicable = None
+    for inc in sorted(increments, key=lambda x: x.lowEdge):
+        if price >= inc.lowEdge:
+            applicable = inc.increment
+        else:
+            break
+
+    if applicable and applicable > 0:
+        return applicable
+    return fallback
+
+
 # ------------------------------------------------------------
 # PLACE ORDER
 # ------------------------------------------------------------
@@ -339,11 +395,20 @@ def place_order(ib, contract, quantity, account_id, limit_price):
     routing_contract.primaryExch = contract.exchange
     routing_contract.exchange = "SMART"
 
-    # Snap limit price to contract's minimum tick size to avoid Error 110.
-    # We fetch details from the original (exchange-specific) contract for accuracy.
-    details = get_contract_details(ib, contract)
-    if details and details.minTick:
-        limit_price = round_up_to_tick(limit_price, details.minTick)
+    # Snap limit price to the tick IBKR enforces for this price band, to avoid
+    # Error 110 (price does not conform to the minimum price variation). We use
+    # the contract's market rule rather than minTick alone, because European
+    # ETFs report minTick 0.01 while the enforced tick can be larger (e.g. 0.02
+    # around EUR 100). We read details from the original (exchange-specific)
+    # contract for accuracy.
+    original_price = limit_price
+    tick = get_price_increment(ib, contract, limit_price)
+    limit_price = round_up_to_tick(limit_price, tick)
+    if limit_price != original_price:
+        print(
+            f"  Adjusted {contract.symbol} limit price "
+            f"{original_price:.2f} -> {limit_price:.2f} (tick {tick}) to conform to IBKR."
+        )
 
     order = LimitOrder("BUY", quantity, limit_price)
     order.account = account_id

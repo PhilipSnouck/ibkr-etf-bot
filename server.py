@@ -154,6 +154,18 @@ def parse_line(line: str, state: dict) -> list:
         events.append({"type": "topup", "account": acc, "needed": m.group(1) == "YES"})
         return events
 
+    # Top-up amount: "Top up needed to reach 4 shares: EUR 3.97"
+    m = re.match(r"Top up needed to reach\s+(\d+)\s+shares:\s+(\w+)\s+([\d.]+)", clean)
+    if m and acc:
+        events.append({
+            "type": "topup_amount",
+            "account": acc,
+            "shares": int(m.group(1)),
+            "currency": m.group(2),
+            "amount": float(m.group(3)),
+        })
+        return events
+
     # Preview table data rows: VUAA  |   60.0% |    4.2500 |      4 |     356.48 | normal
     if state.get("in_preview") and "|" in clean:
         parts = [p.strip() for p in clean.split("|")]
@@ -202,7 +214,7 @@ def parse_line(line: str, state: dict) -> list:
 
     # Pending top-up status messages
     if "Pending top-up found, but it has expired" in clean:
-        events.append({"type": "topup_info", "account": acc, "level": "warning", "message": "Pending top-up expired — running normal allocation"})
+        events.append({"type": "topup_info", "account": acc, "level": "warning", "message": "Pending top-up expired - running normal allocation"})
         return events
 
     if re.search(r"Pending top-up found\.", clean):
@@ -210,7 +222,7 @@ def parse_line(line: str, state: dict) -> list:
         return events
 
     if "Pending top-up is now fully funded" in clean:
-        events.append({"type": "topup_info", "account": acc, "level": "success", "message": "Top-up fully funded — order will be placed"})
+        events.append({"type": "topup_info", "account": acc, "level": "success", "message": "Top-up fully funded - order will be placed"})
         return events
 
     if "Pending top-up is still NOT fully funded" in clean:
@@ -231,11 +243,11 @@ def parse_line(line: str, state: dict) -> list:
         return events
 
     if "Pending top-up file NOT saved because execution was not fully filled" in clean:
-        events.append({"type": "topup_info", "account": acc, "level": "warning", "message": "Top-up not saved — order not fully filled"})
+        events.append({"type": "topup_info", "account": acc, "level": "warning", "message": "Top-up not saved - order not fully filled"})
         return events
 
     if "Pending top-up file kept because execution was not fully filled" in clean:
-        events.append({"type": "topup_info", "account": acc, "level": "warning", "message": "Top-up file kept — order not fully filled"})
+        events.append({"type": "topup_info", "account": acc, "level": "warning", "message": "Top-up file kept - order not fully filled"})
         return events
 
     # Safety stop
