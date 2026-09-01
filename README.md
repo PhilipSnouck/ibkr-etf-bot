@@ -30,6 +30,9 @@ For each configured account, the bot:
 All orders are **limit orders** placed at `price × (1 + markup)` (default: 0.5% above last price). This means:
 - You pay at or below the limit price — never above it
 - The markup gives a small buffer so the order fills even if the price ticks up slightly
+- The limit price is nudged **up** to the nearest price step the exchange allows (each ETF has
+  a minimum step, and it can be bigger than one cent). Without this, the exchange rejects the
+  order outright: that is what happened to IMAE on 1 September 2026
 - Orders are placed simultaneously across all ETFs in an account
 - The bot waits up to 2 minutes for fills; if an order hasn't confirmed by then it warns you and stops — check TWS before re-running
 

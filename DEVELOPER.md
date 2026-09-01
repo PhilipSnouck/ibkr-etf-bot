@@ -112,9 +112,22 @@ Per-account keys (from `main.py`/`rules.py`): `enabled`, `allocator`, `currency`
 ## Order safety mechanisms (broker.py / account_processor.py)
 
 - **Limit orders only**, BUY, TIF=DAY. Limit = `price × (1 + markup)`, then rounded **up**
-  to the contract's minTick with Decimal arithmetic (`round_up_to_tick`, avoids IBKR Error 110).
-- **SMART routing**: `place_order` copies the contract, sets `primaryExch` to the listing
-  exchange and `exchange = "SMART"` — avoids Error 10311 from Gateway precautionary
+  to a valid tick with Decimal arithmetic (`round_up_to_tick`), which avoids IBKR Error 110
+  ("price does not conform to the minimum price variation").
+- **Tick size comes from the market rule of the venue the order is routed to**, not from
+  `minTick` and not from the listing exchange. `get_price_increment` reads the contract's
+  market rule (`reqMarketRule`) and returns the increment for the band the price falls in.
+  Two traps, both real and both already hit:
+  1. `minTick` is only the *smallest possible* tick; MiFID II venues widen the tick as the
+     price rises, so a minTick-conforming price can still be rejected.
+  2. The listing exchange and SMART can have **different rules for the same contract**.
+     IMAE reports a flat 0.005 tick on AEB but a banded rule on SMART where EUR 100-200
+     requires 0.02, so EUR 105.83 passed the bot's check and was cancelled by IBKR
+     (2026-09-01). Since orders always go to SMART, SMART's rule is the one that counts.
+  Falls back to `minTick`, then to 0.01, if the rule cannot be read, so it can never be
+  worse than no lookup at all. Guarded by `test_tick_conformance.py`.
+- **SMART routing**: `place_order` copies the contract, sets `primaryExchange` to the listing
+  exchange and `exchange = "SMART"`, which avoids Error 10311 from Gateway precautionary
   settings (which reset on every Gateway restart).
 - **Guards in place_order**: quantity > 0 and limit_price > 0 or ValueError.
 - **Safety stops** (account skipped, nothing placed): cash unreadable, contract won't
@@ -141,12 +154,19 @@ Per-account keys (from `main.py`/`rules.py`): `enabled`, `allocator`, `currency`
 3. Click **Execute all** (only enabled after a clean preview + green Gateway indicator).
 4. Close the tab → beacon to `/api/shutdown` kills IBGateway.exe.
 
-Server lives only while the cmd window is open. No tests, no linter, no CI.
+Server lives only while the cmd window is open. No linter, no CI. One test:
+`python test_tick_conformance.py` (offline, no Gateway, places nothing) checks that every
+configured ETF's limit price conforms to the tick IBKR enforces on SMART.
 
 ---
 
 ## Gotchas
 
+- **`main.py` has no `if __name__ == "__main__"` guard.** It is a top-level script: merely
+  `import main` runs a full bot pass, and if Gateway is down that fires IBC's
+  `StartGateway.bat` and a 2FA prompt on Philip's phone. Buying still needs `buy` on the
+  command line, so an accidental import cannot place orders, but do not import `main` to
+  test that the code parses. Use `python -c "import broker"` or `python -m py_compile main.py`.
 - Deps are installed **globally** (no venv): `fastapi`, `uvicorn`, `ib_async`, pinned in `requirements.txt`. A Python upgrade or reinstall wipes them; the symptom is the launcher window flashing `No module named uvicorn` and the browser showing `ERR_CONNECTION_REFUSED`. Recover with `python -m pip install -r requirements.txt`. The launcher calls `python -m uvicorn` (not bare `uvicorn`) so it still works when Python's Scripts dir is not on PATH.
 - There is **no double-run guard**: re-running Execute after a timeout can double-buy if
   the earlier order is still open (open orders don't reduce reported cash). The planned

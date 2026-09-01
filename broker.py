@@ -321,17 +321,23 @@ def round_up_to_tick(price: float, min_tick: float) -> float:
     return float(rounded)
 
 
-def get_price_increment(ib, contract, price):
+def get_price_increment(ib, contract, price, routing_exchange=None):
     """
-    Return the exact tick size IBKR enforces for this contract AT THIS PRICE.
+    Return the exact tick size IBKR enforces for this contract AT THIS PRICE,
+    on the venue the order is actually sent to.
 
     European venues use MiFID II price bands: the valid tick grows with the
     price (e.g. EUR 0.01 below EUR 50, EUR 0.02 around EUR 100, ...). The
-    contract's `minTick` reports only the smallest possible tick (usually
-    EUR 0.01), so rounding to minTick alone still produces prices IBKR rejects
-    with Error 110. We therefore read the contract's market rule, which lists
-    the increment per price band, and return the increment for the band the
-    price falls into.
+    contract's `minTick` reports only the smallest possible tick, so rounding
+    to minTick alone still produces prices IBKR rejects with Error 110. We
+    therefore read the contract's market rule, which lists the increment per
+    price band, and return the increment for the band the price falls into.
+
+    `routing_exchange` is the venue the order is routed to (SMART for this bot).
+    That rule, not the listing exchange's, is the one IBKR validates the price
+    against, and the two can differ: IMAE reports a flat 0.005 tick on AEB but
+    a banded rule on SMART where EUR 100-200 requires 0.02. Reading the listing
+    rule alone therefore still produced Error 110 for IMAE.
 
     Falls back to `minTick`, then to EUR 0.01, if the market rule can't be
     read, so this can never make order placement worse than before.
@@ -349,9 +355,21 @@ def get_price_increment(ib, contract, price):
     rule_ids = [r.strip() for r in str(details.marketRuleIds).split(",")]
     rule_map = dict(zip(exchanges, rule_ids))
 
-    # Prefer the listing (primary) exchange, where the tick band is enforced.
-    preferred = getattr(contract, "primaryExchange", "") or getattr(contract, "exchange", "")
-    rule_id = rule_map.get(preferred) or (rule_ids[0] if rule_ids else None)
+    # Prefer the exchange the order is routed to, then the listing (primary)
+    # exchange, then whatever the contract itself names.
+    rule_id = None
+    for name in (
+        routing_exchange,
+        getattr(contract, "primaryExchange", ""),
+        getattr(contract, "exchange", ""),
+    ):
+        if name and rule_map.get(name):
+            rule_id = rule_map[name]
+            break
+
+    if not rule_id:
+        rule_id = rule_ids[0] if rule_ids else None
+
     if not rule_id:
         return fallback
 
@@ -389,20 +407,23 @@ def place_order(ib, contract, quantity, account_id, limit_price):
 
     # Route via SMART to avoid Error 10311 (direct routing restriction in
     # Gateway Precautionary Settings, which resets on every Gateway restart).
-    # primaryExch preserves the listing exchange so IB can identify the contract.
+    # primaryExchange preserves the listing exchange so IB can identify the contract.
     from copy import copy
     routing_contract = copy(contract)
-    routing_contract.primaryExch = contract.exchange
+    routing_contract.primaryExchange = contract.exchange
     routing_contract.exchange = "SMART"
 
     # Snap limit price to the tick IBKR enforces for this price band, to avoid
     # Error 110 (price does not conform to the minimum price variation). We use
-    # the contract's market rule rather than minTick alone, because European
-    # ETFs report minTick 0.01 while the enforced tick can be larger (e.g. 0.02
-    # around EUR 100). We read details from the original (exchange-specific)
-    # contract for accuracy.
+    # the contract's market rule rather than minTick alone, because the enforced
+    # tick can be larger than minTick (e.g. 0.02 around EUR 100). The rule that
+    # counts is the one of the venue we route to, not the listing exchange: for
+    # IMAE those differ (0.005 on AEB, 0.02 on SMART at EUR 100-200). We read
+    # details from the original (exchange-specific) contract for accuracy.
     original_price = limit_price
-    tick = get_price_increment(ib, contract, limit_price)
+    tick = get_price_increment(
+        ib, contract, limit_price, routing_exchange=routing_contract.exchange
+    )
     limit_price = round_up_to_tick(limit_price, tick)
     if limit_price != original_price:
         print(

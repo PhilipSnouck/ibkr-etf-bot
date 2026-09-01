@@ -2,7 +2,7 @@
 
 Python bot that automates periodic ETF purchases across multiple Interactive Brokers accounts.
 Run manually once per period via a local web dashboard: Preview → Execute. Safe by default, deterministic, transparent.
-Built with Python 3.10+, FastAPI + SSE, ib_insync, IBC for Gateway login. Runs locally on Philip's laptop.
+Built with Python 3.10+, FastAPI + SSE, ib_async, IBC for Gateway login. Runs locally on Philip's laptop.
 
 - **Live:** localhost only (laptop)
 - **GitHub:** https://github.com/PhilipSnouck/ibkr-etf-bot
@@ -56,6 +56,20 @@ Done when: an unfilled order is re-priced and retried a bounded number of times,
 ---
 
 # ✅ Done
+
+## Tick-conforming limit prices (S)
+
+IBKR cancelled orders with Error 110, "the price does not conform to the minimum price
+variation for this contract". Limit prices are now snapped **up** to a valid tick read from
+the market rule of the venue the order is actually routed to (SMART), per price band,
+instead of from `minTick` or the listing exchange.
+Done when: no ETF in the config can produce a non-conforming limit price.
+
+- [x] Round limit prices up to a valid tick with Decimal arithmetic (`round_up_to_tick`)
+- [x] Read the per-band increment from the contract's market rule instead of `minTick`
+- [x] Use the market rule of the routed venue (SMART), not the listing exchange (fixes IMAE, which is 0.005 on AEB but 0.02 on SMART between EUR 100 and 200)
+- [x] Set `primaryExchange` in `place_order` instead of the non-existent `primaryExch`
+- [x] Offline regression test with frozen IBKR market-rule data (`test_tick_conformance.py`)
 
 ## Core bot engine (L)
 - [x] Per-account flow: connect → read cash → fetch prices → allocate → check rules → preview → execute
@@ -116,6 +130,7 @@ config.py                # Loads settings from config_store.json
 config_store.json        # Single source of truth for all settings
 allocator_*.py           # Strategy functions + registry
 pending_topup.py         # Persistent state for incomplete trades
+test_tick_conformance.py # Offline Error 110 regression test (no Gateway, no orders)
 dashboard/               # index.html (preview+execute) + settings.html
 IBKR_dashboard.bat      # Double-click to start server + open browser
 ```
