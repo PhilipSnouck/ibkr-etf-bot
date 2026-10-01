@@ -610,6 +610,86 @@ def get_price_increment(ib, contract, price, routing_exchange=None):
 
 
 # ------------------------------------------------------------
+# ROUTING CONTRACT
+# ------------------------------------------------------------
+def build_routing_contract(ib, contract):
+    """
+    The contract an order is sent on: the same instrument, routed via SMART.
+
+    SMART is a routing destination, not an instrument chooser. We route that
+    way to avoid Error 10311 (the direct-routing restriction in Gateway's
+    precautionary settings, which resets on every Gateway restart).
+
+    The previous version copied the qualified contract and swapped only the
+    exchange, which left `localSymbol` and `tradingClass` from the listing
+    venue attached. One ETF is listed as several lines, each with different
+    values for those fields, so the request effectively said "route this
+    anywhere, but it must be the line whose local symbol is EGLN on LSE".
+    IBKR resolved SMART to its own composite line, saw the mismatch, and
+    cancelled the order with Error 478.
+
+    `conId` is IBKR's unique key for an instrument and `qualifyContracts`
+    has already filled it in, so conId + SMART + currency is unambiguous.
+    We still verify rather than trust: we ask IBKR what that routed contract
+    resolves to and refuse to place the order if it is not the same
+    instrument we priced. Buying the wrong ETF is the one failure mode this
+    function must make impossible.
+    """
+    from ib_async import Contract
+
+    if not getattr(contract, "conId", None):
+        raise ValueError(
+            f"Cannot route {contract.symbol} via SMART: the contract has no conId. "
+            f"It was not qualified against IBKR."
+        )
+
+    def minimal():
+        return Contract(
+            secType=getattr(contract, "secType", "") or "STK",
+            conId=contract.conId,
+            exchange="SMART",
+            currency=contract.currency,
+        )
+
+    resolved = ib.qualifyContracts(minimal())
+
+    if not resolved:
+        raise ValueError(
+            f"Cannot route {contract.symbol} via SMART: IBKR did not resolve "
+            f"conId {contract.conId} to any contract."
+        )
+
+    check = resolved[0]
+    mismatches = []
+
+    if check.conId != contract.conId:
+        mismatches.append(f"conId {check.conId} != {contract.conId}")
+
+    if (check.symbol or "").upper() != (contract.symbol or "").upper():
+        mismatches.append(f"symbol {check.symbol!r} != {contract.symbol!r}")
+
+    if (check.currency or "").upper() != (contract.currency or "").upper():
+        mismatches.append(f"currency {check.currency!r} != {contract.currency!r}")
+
+    if mismatches:
+        raise ValueError(
+            f"Refusing to order {contract.symbol}: routing it via SMART resolves to a "
+            f"different instrument than the one that was priced ({'; '.join(mismatches)}). "
+            f"No order was placed."
+        )
+
+    print(
+        f"  Routing {contract.symbol} via SMART as conId {check.conId} "
+        f"({check.symbol} {check.currency}, localSymbol {check.localSymbol or '-'})."
+    )
+
+    # Send the minimal contract, not the one IBKR just filled in: the
+    # resolved copy carries venue-specific fields again, which is exactly
+    # what caused Error 478.
+    return minimal()
+
+
+# ------------------------------------------------------------
 # PLACE ORDER
 # ------------------------------------------------------------
 def place_order(ib, contract, quantity, account_id, limit_price):
@@ -619,13 +699,7 @@ def place_order(ib, contract, quantity, account_id, limit_price):
     if limit_price is None or limit_price <= 0:
         raise ValueError("Limit price must be greater than 0.")
 
-    # Route via SMART to avoid Error 10311 (direct routing restriction in
-    # Gateway Precautionary Settings, which resets on every Gateway restart).
-    # primaryExchange preserves the listing exchange so IB can identify the contract.
-    from copy import copy
-    routing_contract = copy(contract)
-    routing_contract.primaryExchange = contract.exchange
-    routing_contract.exchange = "SMART"
+    routing_contract = build_routing_contract(ib, contract)
 
     # Snap limit price to the tick IBKR enforces for this price band, to avoid
     # Error 110 (price does not conform to the minimum price variation). We use
