@@ -75,21 +75,20 @@ def test_the_live_rejection_no_longer_happens():
     assert result["topup"]["needed"], \
         "being just short of one more share is exactly what the top-up is for"
 
-    # WARNING: this pins CURRENT behaviour, which the 2026-10-01 audit found to
-    # be a critical defect (report finding C1). The allocators set
-    # chosen_shares = 0 in the top-up branch, so the account buys NOTHING
-    # rather than the 32 shares it could comfortably afford. 25% of
-    # single-ETF runs invest nothing because of it.
+    # Buying zero here is DELIBERATE, not a defect. The 2026-10-01 audit
+    # flagged it as one (finding C1) on the grounds that 32 affordable shares
+    # are skipped to wait for the 33rd. Philip's decision on 2026-10-01 is to
+    # keep waiting: buying 32 now and 1 after the top-up means paying a second
+    # transaction fee for that single share, and he tops up within the hour,
+    # so the cash is idle for minutes rather than days.
     #
-    # Sizing at the limit price is correct and is what this file exists to
-    # guard. Buying zero is not. When the allocators are fixed to buy
-    # floor_shares, change this assertion to expect 32 and delete this note.
+    # Do not "fix" this without asking. The behaviour this file guards is that
+    # the plan is sized at the LIMIT price, which is what stops Error 201.
     assert result["shares"]["IWDA"] == 0, \
-        "current (defective) behaviour: the whole position is skipped, see audit C1"
+        "all-or-nothing is intended: wait for the top-up rather than split the buy"
 
     print(f"  live case: sized at limit, top-up for {result['topup']['target_shares']} "
           f"shares        OK")
-    print("    NOTE: buys 0 shares, not 32 - known defect C1, not yet fixed")
 
 
 def test_no_plan_ever_exceeds_cash():

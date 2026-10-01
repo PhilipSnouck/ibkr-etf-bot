@@ -12,21 +12,22 @@ Built with Python 3.10+, FastAPI + SSE, ib_async, IBC for Gateway login. Runs lo
 
 # 🔥 Now
 
-## Stop the allocator refusing to invest (S)
+## Make an account all or nothing (M)
 
-The top-up trigger sets `chosen_shares = 0`, so when the fractional part of `raw_shares`
-reaches 0.75 the account buys NOTHING, not just the one share it cannot afford. Correct for
-Pension's ETF3 remainder leg (0 to 3 shares), badly wrong for a 100%-weight account where
-`floor_shares` is 30+. Swept offline: 25% of single-ETF runs buy zero and leave an average
-of 5032 EUR idle. This is why Samen investeren keeps buying nothing, and the Error 201 fix
-of 2026-10-01 only changed the failure from a rejection into a silent skip.
-Done when: an account buys what it can afford and tops up only for the remainder.
+Pension filled VUAA and IMAE while EGLN was cancelled by Error 478, which leaves the account
+off its target weights until the next run corrects it. Philip wants a Pension run to be all
+or nothing: either every leg goes through or none does, so the percentages stay right and a
+re-run does not compound the imbalance.
+True atomicity is not available at IBKR across separate instruments, so the aim is to move
+every knowable failure in front of the first order, and to contain the rest.
+Done when: a Pension run cannot end with some legs bought and others not, without the
+dashboard saying so loudly.
 
-- [ ] Allocators buy `floor_shares` instead of 0; all-or-nothing only when `floor_shares == 0` (S)
-- [ ] Pension ETF1 gets the same `while shares > 0` loop as ETF2 and ETF3; a negative share count is a hard stop (S)
-- [ ] Move the tick snap in front of sizing: compute once in `main.py`, `place_order` asserts rather than adjusts (S)
-- [ ] Extract `build_plan()` from `main.py` so the sweep tests the shipped path, not a re-implementation (M)
-- [ ] `assert_affordable` must include the tick snap; the current invariant is false without it (S)
+- [ ] Pre-flight every leg before placing any of them: routing contract resolves, limit price conforms to tick, cash covers the whole plan at limit prices (M)
+- [ ] Place nothing for that account if any pre-flight check fails, and say which leg failed (S)
+- [ ] If a leg is still rejected after placement, cancel the account's remaining unfilled orders (M)
+- [ ] Report the resulting imbalance explicitly rather than leaving it to be noticed (S)
+- [ ] Decide whether a partially filled account should block the next run until acknowledged (S)
 
 ## Give the run error boundaries (M)
 
@@ -98,6 +99,21 @@ Done when: an unfilled order is re-priced and retried a bounded number of times,
 ---
 
 # ✅ Done
+
+## Keep all-or-nothing on the top-up (S)
+
+The 2026-10-01 audit raised as critical (finding C1) that the allocators buy nothing when the
+fractional part of `raw_shares` reaches the top-up trigger, rather than buying the shares that
+are affordable: on a 100%-weight account that skips 32 shares to wait for the 33rd, and it
+fires on roughly 25% of runs.
+Decision (Philip, 2026-10-01): keep waiting. Buying 32 now and 1 after the top-up means a
+second transaction fee for that single share, and a top-up usually happens within the hour, so
+the cash is idle for minutes rather than days. The audit measured the exposure correctly but
+weighed it without knowing the fee cost or the top-up turnaround.
+Done when: the behaviour is documented as deliberate so it is not "fixed" by a later pass.
+
+- [x] Decision recorded here and in `test_order_sizing.py` next to the assertion (S)
+- [x] Confirmed the related real defects (sizing at the raw price, the hidden rejection) are separately fixed (S)
 
 ## Route orders by contract id (S)
 
