@@ -27,19 +27,37 @@ failed and why.
 - [ ] Run Preview All live and check which rung supplies VUAA (S)
 - [ ] If every rung fails, compare VUAA on an alternative venue with data that works (S)
 
-## Fix cash rejection on execute (S)
+## Fix EGLN order rejection 478 (M)
 
-IBKR rejected a Samen investeren order with Error 201: settled cash 4261.40, needed
-4280.90. The allocators size shares against the raw price, while the order is placed at
-price x (1 + markup) rounded up to tick, so a plan can exceed available cash by roughly the
-markup. `main.py` and the pending top-up path already compute against the limit price, only
-the allocators do not. It fires whenever the leftover after flooring is under ~0.5% of the
-order, which is why it looks intermittent.
-Done when: no plan can produce an order costing more cash than the account holds.
+Pension's EGLN order is cancelled by IBKR with Error 478, "requested ibLocalSymbol EGLN,
+from contract PPFB". `place_order` routes via SMART by copying the qualified contract and
+swapping the exchange, which leaves `localSymbol` and `tradingClass` from the LSEETF
+listing attached to a request IBKR now resolves differently. Clearing those fields is the
+obvious fix but must NOT be done blind: if the conId really does resolve to another
+instrument under SMART, clearing the identifying fields would buy the wrong ETF with real
+money. Verify what SMART resolves to before trusting it.
+Done when: EGLN orders are accepted, and the bot refuses to place an order whose routed
+contract does not match the one that was priced.
 
-- [ ] Size shares against `calc_limit_price(price, markup)` in all three allocators (S)
-- [ ] Decide whether `get_account_cash` should read `SettledCash` rather than `TotalCashValue` (S)
-- [ ] Offline regression test covering the near-exact-cash case (S)
+- [ ] Re-qualify the SMART-routed contract and log what IBKR resolves it to (S)
+- [ ] Compare symbol, currency and conId against the priced contract, abort on mismatch (S)
+- [ ] Only then decide whether to clear `localSymbol` / `tradingClass` (S)
+- [ ] Check whether the same risk applies to the SMART rung in the price fallback chain (S)
+
+## Review the execution path (M)
+
+Three independent defects surfaced in a single live run on 2026-10-01: Error 478 on EGLN,
+the cash-sizing rejection, and the dashboard showing a green "Ready" badge on an account
+whose only order was rejected. Two were long-standing and simply had not met their trigger
+conditions. That rate suggests the order and status path deserves a deliberate read rather
+than another round of symptom chasing.
+Done when: the execute path has been reviewed end to end and findings are either fixed or
+written down here.
+
+- [ ] Read `place_order`, `execute_plan` and the `pending_followup` branches end to end (M)
+- [ ] Check every IBKR terminal status is handled in both the bot and the dashboard parser (S)
+- [ ] Confirm `get_account_cash` should read `SettledCash` rather than `TotalCashValue` (S)
+- [ ] `order_commission_buffer` is flat 1.25 EUR but IBKR charged ~3.10 on a 4.2k order; make it scale (S)
 
 ---
 
@@ -83,6 +101,34 @@ Done when: an unfilled order is re-priced and retried a bounded number of times,
 ---
 
 # ✅ Done
+
+## Size orders at the limit price (S)
+
+IBKR rejected orders with Error 201, "Available settled cash ... Cash needed for this
+order". The allocators counted shares at the last traded price while the order was placed
+at price x (1 + markup), so IBKR reserved more cash than the plan assumed. A sweep of the
+danger band shows 34.8% of plans would have been rejected, which is the "it works
+sometimes" that made this so hard to pin down. `main.py` now derives `order_prices` once
+and hands those to the allocator, so the cash arithmetic and the order can never diverge
+again. The markup keeps doing its real job, which is making a delayed-price limit fill.
+Done when: no plan can produce an order costing more cash than the account holds.
+
+- [x] Size against `calc_limit_price(price, markup)`, derived once in `main.py` (S)
+- [x] Allocators stay pure functions, no signature change needed (S)
+- [x] Regression test on the live 4261.40 / 128.71 rejection (`test_order_sizing.py`) (S)
+- [x] Sweep 1900 plans across the danger band and assert none exceeds cash (S)
+
+## Report rejected orders honestly (S)
+
+An account whose only order came back `Inactive` (how IBKR reports a rejection) kept its
+green "Ready" badge, because the dashboard counted only statuses containing "cancel" and
+the badge logic had no final else. The run summary missed it too. Rejections were therefore
+invisible in the UI and only findable in the raw log.
+Done when: any order that is not Filled is visible as a failure.
+
+- [x] Treat every non-Filled terminal status as a failure, not just "cancel" (S)
+- [x] Add the missing else so a card can never keep a stale "Ready" badge (S)
+- [x] Reword the run summary from "cancelled" to "not filled" (S)
 
 ## Market data diagnostics (S)
 

@@ -227,11 +227,27 @@ try:
         # RUN ALLOCATOR
         # --------------------------------------------------------
         topup_trigger = get_topup_trigger(account_settings)
+        limit_order_markup = account_settings.get("limit_order_markup", DEFAULT_LIMIT_ORDER_MARKUP)
+
+        # Size the plan against the price the order will actually be placed
+        # at, not the last traded price. The markup exists so a limit order
+        # still fills when a delayed price has drifted up, but it also means
+        # IBKR reserves cash at that higher price. Counting shares at the raw
+        # price therefore plans shares the account cannot pay for, and IBKR
+        # rejects the order with Error 201.
+        #
+        # `prices` stays the real market price and is what the preview shows
+        # as the market quote; `order_prices` is what the cash arithmetic and
+        # the order itself use, so the two can never drift apart again.
+        order_prices = {
+            symbol: calc_limit_price(price, limit_order_markup)
+            for symbol, price in prices.items()
+        }
 
         result = allocator(
             cash=cash,
             etf_config=etf_config,
-            prices=prices,
+            prices=order_prices,
             topup_trigger=topup_trigger,
         )
 
@@ -244,10 +260,8 @@ try:
         totals = result["totals"]
         actual_pct = result["actual_pct"]
 
-        limit_order_markup = account_settings.get("limit_order_markup", DEFAULT_LIMIT_ORDER_MARKUP)
-
         if topup["needed"]:
-            topup_limit_price = calc_limit_price(prices[topup["symbol"]], limit_order_markup)
+            topup_limit_price = order_prices[topup["symbol"]]
             cash_ref = topup.get("remaining_cash_before_etf3", cash)
             topup["topup_amount"] = max(
                 topup["target_shares"] * topup_limit_price + ORDER_COMMISSION_BUFFER - cash_ref,
@@ -317,7 +331,7 @@ try:
                 "symbol": symbol,
                 "contract": qualified_contracts[symbol],
                 "quantity": shares[symbol],
-                "limit_price": calc_limit_price(prices[symbol], limit_order_markup),
+                "limit_price": order_prices[symbol],
             })
 
         pending_followup = None

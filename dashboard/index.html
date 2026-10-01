@@ -305,9 +305,9 @@
           if (totalFilled > 0 && totalCancelled === 0) {
             setStatus('All orders filled.', false);
           } else if (totalFilled > 0) {
-            setStatus(`${totalFilled} order${totalFilled !== 1 ? 's' : ''} filled, ${totalCancelled} cancelled - check raw log.`, true);
+            setStatus(`${totalFilled} order${totalFilled !== 1 ? 's' : ''} filled, ${totalCancelled} not filled - check raw log.`, true);
           } else {
-            setStatus('All orders cancelled - check raw log for details.', true);
+            setStatus('No orders filled - check raw log for details.', true);
           }
           document.getElementById('action-label').textContent = 'Done';
           document.getElementById('btn-execute').disabled = true;
@@ -413,9 +413,14 @@
 
   function updateExecutionRow(ev) {
     const rowEl = document.getElementById(`${cardId(ev.account)}-row-${ev.symbol}`);
-    const isCancelled = ev.status.toLowerCase().includes('cancel');
+    // IBKR's terminal statuses are Filled, Cancelled, ApiCancelled and
+    // Inactive. "Inactive" is how a rejected order comes back (e.g. Error 201,
+    // not enough settled cash). Anything that is not Filled is a failure, and
+    // counting only 'cancel' left rejections invisible: the card kept its
+    // green "Ready" badge while nothing had actually been bought.
     const isFilled = ev.status === 'Filled';
-    const statusClass = isFilled ? 'filled' : isCancelled ? 'cancelled' : 'pending';
+    const isFailed = !isFilled;
+    const statusClass = isFilled ? 'filled' : 'cancelled';
     if (rowEl) {
       rowEl.innerHTML = `
         <span class="etf-ticker">${ev.symbol}</span>
@@ -427,7 +432,7 @@
     // Track per-account execution results
     if (!execResults[ev.account]) execResults[ev.account] = { filled: 0, cancelled: 0 };
     if (isFilled) execResults[ev.account].filled++;
-    if (isCancelled) execResults[ev.account].cancelled++;
+    if (isFailed) execResults[ev.account].cancelled++;
 
     // Update account badge - re-evaluate after every row comes in
     const statusEl = document.getElementById(`${cardId(ev.account)}-status`);
@@ -439,8 +444,10 @@
       } else if (r.filled > 0) {
         statusEl.textContent = '✓ Filled';
         statusEl.className = 'status-badge status-ok';
-      } else if (r.cancelled > 0) {
-        statusEl.textContent = '✗ Cancelled';
+      } else {
+        // No final else before: an account whose only order came back
+        // Inactive kept its pre-execution "Ready" badge and looked fine.
+        statusEl.textContent = '✗ Not filled';
         statusEl.className = 'status-badge status-error';
       }
     }
