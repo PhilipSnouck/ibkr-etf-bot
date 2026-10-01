@@ -99,6 +99,24 @@ Done when: an unfilled order is re-priced and retried a bounded number of times,
 
 # ✅ Done
 
+## Route orders by contract id (S)
+
+IBKR cancelled Pension's EGLN order with Error 478, "requested ibLocalSymbol EGLN, from
+contract PPFB". `place_order` copied the qualified contract and swapped only the exchange,
+leaving `localSymbol` and `tradingClass` from the LSEETF listing attached. One ETF is listed
+as several lines with different values for those fields, so the request contradicted itself.
+SMART is a routing destination, not an instrument chooser, and `conId` already identifies the
+instrument uniquely.
+Done when: EGLN orders are accepted, and the bot cannot place an order on an instrument other
+than the one it priced.
+
+- [x] Build the routing contract from `conId` + SMART + currency, dropping venue fields (S)
+- [x] Ask IBKR what the routed contract resolves to and verify conId, symbol and currency (S)
+- [x] Refuse to place the order on any mismatch rather than trusting the resolution (S)
+- [x] Send the minimal contract, not IBKR's resolved copy, which refills venue fields (S)
+- [x] Offline test covering wrong-instrument, wrong-currency and unqualified cases (S)
+- [ ] Confirm live that an EGLN order is accepted
+
 ## Size orders at the limit price (S)
 
 IBKR rejected orders with Error 201, "Available settled cash ... Cash needed for this
