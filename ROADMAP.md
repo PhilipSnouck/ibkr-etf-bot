@@ -12,20 +12,20 @@ Built with Python 3.10+, FastAPI + SSE, ib_async, IBC for Gateway login. Runs lo
 
 # 🔥 Now
 
-## Diagnose VUAA price failure (M)
+## Confirm VUAA fallback works live (S)
 
-Preview All prices VUAA fine, Execute All fails it with Error 354 and aborts the whole
-Pension account. Preview and execute are separate processes that reconnect to Gateway on
-the same clientId, so the leading theory is that the market data session is not ready on
-the second connection, not that an entitlement is missing. Diagnostics are now in place to
-settle it from the log instead of by guesswork.
-Done when: a failed run names its own cause, and a fix is confirmed by a clean execute.
+IBKR refuses VUAA on BVME.ETF with Error 354 intermittently, which killed the whole Pension
+account because the bot had only one way to get a price. Root-causing the refusal went
+nowhere across several sessions: market hours, Gateway timing and clientId reuse were all
+ruled out, and the refusal is intermittent, which rules out a missing entitlement too. The
+fix is resilience rather than diagnosis, and it is now built and tested offline.
+Done when: a live run prices VUAA through one of the fallback rungs, or names which rung
+failed and why.
 
-- [x] Record IBKR messages, farm status, per-pass ticker fields and connection setup (S)
-- [ ] Run Preview then Execute and read the PRICE DIAGNOSTIC block (S)
-- [ ] If no farm status precedes the fetch: give preview and execute separate clientIds (S)
-- [ ] If farm status precedes the fetch: entitlement is genuinely missing, decide venue vs subscription (M)
-- [ ] Restore a fallback pass so one missing price no longer aborts an account (M)
+- [x] Fallback chain: SMART routing, delayed frozen, historical close (M)
+- [x] Offline regression test for all three shapes (`test_price_fallback.py`) (S)
+- [ ] Run Preview All live and check which rung supplies VUAA (S)
+- [ ] If every rung fails, compare VUAA on an alternative venue with data that works (S)
 
 ## Fix cash rejection on execute (S)
 

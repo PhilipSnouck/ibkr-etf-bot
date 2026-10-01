@@ -142,8 +142,33 @@ Per-account keys (from `main.py`/`rules.py`): `enabled`, `allocator`, `currency`
   `max_pending_topup_age_days`.
 - Prices come from **delayed data** (`reqMarketDataType(3)`), warm-up pass + real pass.
   The markup buffer is what makes delayed-price limits fill anyway.
-  There is **no fallback**: if either ETF in an account has no price, the whole account is
-  skipped. A missing price is therefore a hard stop, not a degraded run.
+
+### Price fallback chain (`get_etf_prices`)
+
+IBKR refuses individual contracts with Error 354 intermittently, and a refusal is
+immediate, so retrying the same request changes nothing. Each rung is therefore a
+**different request path**, tried only for symbols still missing a price:
+
+1. delayed streaming on the listing venue (warm-up pass, then real pass)
+2. delayed streaming routed via **SMART** (orders already route this way; price requests
+   did not, and a venue feed can be refused where the SMART composite is served)
+3. **delayed frozen** (`reqMarketDataType(4)`), the last known quote
+4. last daily close from `reqHistoricalData`, `TRADES` then `MIDPOINT` (a separate service
+   at IBKR with its own entitlements)
+
+Only if all four fail is the account skipped. A healthy run never touches rungs 2 to 4, so
+this costs nothing when things work. The session is always put back to delayed after the
+frozen rung, or later requests would silently keep serving frozen data.
+
+**Why a stale fallback price is safe**: orders are LIMIT orders priced off this number. A
+stale-high price puts the limit above the market and fills at the market price; a stale-low
+price puts the limit below the market and simply does not fill. The downside of an old
+price is a missed fill, never an overpay. Sizing is slightly off, which the commission
+buffer and the top-up trigger absorb.
+
+Every rung used is printed, and `Prices:` names the path each price came from, so a fill
+can always be traced to the kind of quote behind it. `test_price_fallback.py` covers all
+three shapes offline.
 
 ### Price diagnostics (`price_diagnostics.py`)
 

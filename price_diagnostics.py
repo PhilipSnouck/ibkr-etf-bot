@@ -134,6 +134,7 @@ class PriceDiagnostics:
         self.fetch_start_seq = 0
         self.requested_type = None
         self.passes = {}          # symbol -> list of per-pass records
+        self.steps = {}           # symbol -> list of fallback-chain outcomes
         self.results = {}         # symbol -> (price, source)
         self.contracts = {}       # symbol -> contract
         self._seq = 0             # message counter, see _on_ib_message
@@ -232,8 +233,15 @@ class PriceDiagnostics:
         self.fetch_start_seq = self._seq
         self.requested_type = requested_type
         self.passes = {}
+        self.steps = {}
         self.results = {}
         self.contracts = {c.symbol: c for c in contract_list}
+
+    def record_step(self, step, symbol, price, note=""):
+        """One rung of the fallback chain, succeeded or not."""
+        self.steps.setdefault(symbol, []).append(
+            {"step": step, "price": price, "note": note, "t": self.t()}
+        )
 
     def record_pass(self, pass_name, symbol, ticker, waited):
         record = {
@@ -270,11 +278,8 @@ class PriceDiagnostics:
         for symbol, (price, source) in self.results.items():
             if price is None:
                 parts.append(f"{symbol} NO PRICE")
-                continue
-
-            last_pass = self.passes.get(symbol, [{}])[-1]
-            type_name = _data_type_name(last_pass.get("data_type"))
-            parts.append(f"{symbol} {price:.2f} ({type_name}, {source})")
+            else:
+                parts.append(f"{symbol} {price:.2f} ({source})")
 
         return "Prices: " + " | ".join(parts)
 
@@ -338,6 +343,7 @@ class PriceDiagnostics:
                 f"close={_num(fields.get('close'))}"
             )
 
+        lines.extend(self._chain_section(symbol))
         lines.extend(self._peer_section(symbol))
         lines.extend(self._message_section(symbol))
         lines.extend(self._farm_section())
@@ -347,6 +353,23 @@ class PriceDiagnostics:
         lines.append("")
 
         return "\n".join(lines)
+
+    def _chain_section(self, symbol):
+        """Every rung of the fallback chain that was tried, and what it gave."""
+        steps = self.steps.get(symbol, [])
+
+        if not steps:
+            return []
+
+        lines = ["", "Fallback chain tried for this symbol:"]
+
+        for record in steps:
+            price = record["price"]
+            outcome = "no price" if price is None else f"{price:.2f}"
+            note = f"  {record['note']}" if record["note"] else ""
+            lines.append(f"  {record['step']:<34} {outcome:>10}{note}")
+
+        return lines
 
     def _peer_section(self, symbol):
         """
@@ -368,16 +391,14 @@ class PriceDiagnostics:
         priced = []
 
         for peer, (price, source) in peers.items():
-            peer_passes = self.passes.get(peer, [{}])
-            type_name = _data_type_name(peer_passes[-1].get("data_type"))
             contract = self.contracts.get(peer)
             venue = getattr(contract, "exchange", "?")
 
             if price is None:
-                lines.append(f"  {peer:6} on {venue:10} NO PRICE")
+                lines.append(f"  {peer:6} on {venue:10}    NO PRICE")
             else:
                 priced.append(peer)
-                lines.append(f"  {peer:6} on {venue:10} {price:10.2f}  ({type_name}, {source})")
+                lines.append(f"  {peer:6} on {venue:10} {price:10.2f}  ({source})")
 
         lines.append("")
 

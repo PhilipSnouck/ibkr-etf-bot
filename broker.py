@@ -25,6 +25,10 @@ _CONNECT_RETRY_DELAY  = 5  # seconds
 # alongside what was actually received.
 REQUESTED_MARKET_DATA_TYPE = 3
 
+# 4 = delayed frozen: the last known quote, served when the live delayed
+# stream has nothing to give. Used only as a fallback, never as the first ask.
+FROZEN_MARKET_DATA_TYPE = 4
+
 
 def connect_ib():
     ib = IB()
@@ -199,7 +203,58 @@ def _safe_cancel_market_data(ib, tickers):
             pass
 
 
-def _request_prices_once(ib, contract_list, wait_seconds=2.0, pass_name="pass"):
+def _smart_routed(contract):
+    """
+    A copy of the contract with market data requested through SMART instead of
+    its listing venue, keeping primaryExchange so IBKR still identifies it.
+
+    Orders already route this way (see place_order). Price requests did not,
+    and a venue-specific feed can be refused where the SMART composite is
+    served, so this is a genuinely different path rather than a retry.
+    """
+    from copy import copy
+
+    routed = copy(contract)
+    routed.primaryExchange = getattr(contract, "primaryExchange", "") or contract.exchange
+    routed.exchange = "SMART"
+    return routed
+
+
+def _historical_close(ib, contract, what_to_show):
+    """
+    Last daily close from IBKR's historical service.
+
+    A separate data path from streaming quotes, with its own entitlements, so
+    it can succeed when a streaming subscription is refused. Returns a float
+    or None, and never raises.
+    """
+    try:
+        bars = ib.reqHistoricalData(
+            contract,
+            endDateTime="",
+            durationStr="5 D",
+            barSizeSetting="1 day",
+            whatToShow=what_to_show,
+            useRTH=True,
+            formatDate=1,
+        )
+    except Exception:
+        return None
+
+    if not bars:
+        return None
+
+    close = getattr(bars[-1], "close", None)
+
+    if close is None or not isfinite(close) or close <= 0:
+        return None
+
+    return float(close)
+
+
+def _request_prices_once(
+    ib, contract_list, wait_seconds=2.0, pass_name="pass", market_data_type=None
+):
     """
     Request delayed streaming prices once.
     Returns {symbol: (price_or_None, source_or_None)}.
@@ -210,7 +265,7 @@ def _request_prices_once(ib, contract_list, wait_seconds=2.0, pass_name="pass"):
     """
     prices = {}
 
-    ib.reqMarketDataType(REQUESTED_MARKET_DATA_TYPE)
+    ib.reqMarketDataType(market_data_type or REQUESTED_MARKET_DATA_TYPE)
     tickers = [ib.reqMktData(contract, "", False, False) for contract in contract_list]
     ib.sleep(wait_seconds)
 
@@ -229,8 +284,22 @@ def get_etf_prices(ib, contracts):
     1. Warm-up pass using delayed streaming data
     2. Real pass using delayed streaming data
 
-    No delayed frozen fallback.
-    No historical fallback.
+    Each rung is a genuinely different request path at IBKR rather than a
+    retry of the same one, because a refusal (Error 354) is immediate and
+    repeating it changes nothing:
+
+      1. delayed streaming on the listing venue, warm-up pass then real pass
+      2. delayed streaming routed via SMART
+      3. delayed FROZEN, the last known quote
+      4. last daily close from the historical service (TRADES, then MIDPOINT)
+
+    Why a stale price is safe here: orders are LIMIT orders priced off this
+    number. If the price is stale high, the limit sits above the market and
+    fills at the market price. If it is stale low, the limit sits below the
+    market and simply does not fill. The downside of an old price is a missed
+    fill, never an overpay.
+
+    Every rung used is printed, so a run always says what it priced from.
 
     Returns {symbol: price_or_None}
     """
@@ -238,26 +307,102 @@ def get_etf_prices(ib, contracts):
 
     DIAG.start_fetch(contract_list, REQUESTED_MARKET_DATA_TYPE)
 
-    # Warm-up pass
+    prices = {}
+    sources = {}
+
+    def absorb(detailed, step_label):
+        """Take any prices this rung produced, record the rest as misses."""
+        for symbol, (price, field) in detailed.items():
+            DIAG.record_step(step_label, symbol, price, field or "")
+
+            if price is not None and prices.get(symbol) is None:
+                prices[symbol] = price
+                sources[symbol] = f"{step_label}, {field}" if field else step_label
+
+    def still_missing():
+        return [c for c in contract_list if prices.get(c.symbol) is None]
+
+    # --- rung 1: delayed streaming on the listing venue ------------------
+    # The warm-up exists because IBKR sometimes fails the first delayed
+    # request for a contract while the next one succeeds.
     _ = _request_prices_once(
         ib, contract_list, wait_seconds=1.5, pass_name="pass 1 warm-up"
     )
     ib.sleep(0.5)
 
-    # Real pass
-    detailed = _request_prices_once(
-        ib, contract_list, wait_seconds=2.0, pass_name="pass 2 real"
+    absorb(
+        _request_prices_once(
+            ib, contract_list, wait_seconds=2.0, pass_name="pass 2 real"
+        ),
+        "delayed streaming",
     )
 
-    prices = {}
+    # --- rung 2: delayed streaming via SMART -----------------------------
+    missing = still_missing()
 
-    for symbol, (price, source) in detailed.items():
-        DIAG.record_result(symbol, price, source)
-        prices[symbol] = price
+    if missing:
+        print(
+            f"  No delayed quote for {', '.join(c.symbol for c in missing)}; "
+            f"retrying via SMART."
+        )
+        routed = [_smart_routed(c) for c in missing]
+        absorb(
+            _request_prices_once(
+                ib, routed, wait_seconds=2.5, pass_name="pass 3 SMART"
+            ),
+            "delayed streaming via SMART",
+        )
 
-    # One line per fetch, on success as well as failure. A run that worked
-    # still records which data type and which quote field it priced from,
-    # which is what makes a later regression diagnosable by comparison.
+    # --- rung 3: delayed frozen ------------------------------------------
+    missing = still_missing()
+
+    if missing:
+        print(
+            f"  Still no quote for {', '.join(c.symbol for c in missing)}; "
+            f"trying frozen data."
+        )
+        absorb(
+            _request_prices_once(
+                ib,
+                missing,
+                wait_seconds=2.5,
+                pass_name="pass 4 frozen",
+                market_data_type=FROZEN_MARKET_DATA_TYPE,
+            ),
+            "delayed frozen",
+        )
+        # Leave the session back on delayed for anything that follows.
+        ib.reqMarketDataType(REQUESTED_MARKET_DATA_TYPE)
+
+    # --- rung 4: historical daily close ----------------------------------
+    missing = still_missing()
+
+    if missing:
+        print(
+            f"  Still no quote for {', '.join(c.symbol for c in missing)}; "
+            f"falling back to last daily close."
+        )
+
+        for contract in missing:
+            for what_to_show in ("TRADES", "MIDPOINT"):
+                close = _historical_close(ib, contract, what_to_show)
+                label = f"historical close ({what_to_show})"
+                DIAG.record_step(label, contract.symbol, close)
+
+                if close is not None:
+                    prices[contract.symbol] = close
+                    sources[contract.symbol] = label
+                    break
+
+    # --- record and report -----------------------------------------------
+    for contract in contract_list:
+        symbol = contract.symbol
+        prices.setdefault(symbol, None)
+        DIAG.record_result(symbol, prices[symbol], sources.get(symbol))
+
+    # One line per fetch, on success as well as failure, so a run always
+    # records which path and which quote field each price came from. That is
+    # what makes a later regression diagnosable by comparison.
     summary = DIAG.summary_line()
 
     if summary:
