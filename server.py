@@ -255,6 +255,13 @@ def parse_line(line: str, state: dict) -> list:
         events.append({"type": "error", "account": acc, "message": clean})
         return events
 
+    # Pre-flight failure. Nothing is placed for the account, so no execution
+    # rows follow and the card would otherwise keep its pre-execution badge,
+    # which is exactly how a rejected order used to pass for "Ready".
+    if re.search(r"Pre-flight failed", clean):
+        events.append({"type": "error", "account": acc, "message": clean})
+        return events
+
     # Approve MFA prompt
     if "Approve the 2FA prompt on your phone" in clean:
         events.append({"type": "mfa_prompt"})

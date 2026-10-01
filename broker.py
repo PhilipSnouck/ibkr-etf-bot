@@ -692,12 +692,26 @@ def build_routing_contract(ib, contract):
 # ------------------------------------------------------------
 # PLACE ORDER
 # ------------------------------------------------------------
-def place_order(ib, contract, quantity, account_id, limit_price):
+def prepare_order(ib, contract, quantity, account_id, limit_price):
+    """
+    Work out everything an order needs and verify it, WITHOUT sending it.
+
+    This exists so an account can be checked as a whole before any of its legs
+    go out. Pension's three ETFs are placed together, so a leg that IBKR
+    refuses at placement time (a routing conflict, a non-conforming price)
+    used to leave the account holding the legs that did succeed and off its
+    target weights. Everything knowable is therefore resolved here, in front
+    of the first order, and `execute_plan` places nothing for an account whose
+    pre-flight failed.
+
+    Returns a dict describing a ready-to-send order. Raises ValueError with a
+    reason that names the symbol if the order cannot be prepared.
+    """
     if quantity <= 0:
-        raise ValueError("Quantity must be greater than 0.")
+        raise ValueError(f"{contract.symbol}: quantity must be greater than 0.")
 
     if limit_price is None or limit_price <= 0:
-        raise ValueError("Limit price must be greater than 0.")
+        raise ValueError(f"{contract.symbol}: limit price must be greater than 0.")
 
     routing_contract = build_routing_contract(ib, contract)
 
@@ -712,18 +726,43 @@ def place_order(ib, contract, quantity, account_id, limit_price):
     tick = get_price_increment(
         ib, contract, limit_price, routing_exchange=routing_contract.exchange
     )
-    limit_price = round_up_to_tick(limit_price, tick)
-    if limit_price != original_price:
+    snapped = round_up_to_tick(limit_price, tick)
+
+    return {
+        "symbol": contract.symbol,
+        "routing_contract": routing_contract,
+        "quantity": quantity,
+        "account_id": account_id,
+        "limit_price": snapped,
+        "requested_price": original_price,
+        "tick": tick,
+        # What IBKR will actually reserve for this leg, at the price it will
+        # actually receive. main.py sizes on the unsnapped limit price, so
+        # this is the number the cash check must use.
+        "cost": quantity * snapped,
+    }
+
+
+def place_prepared_order(ib, prepared):
+    """Send an order that prepare_order already resolved and verified."""
+    if prepared["limit_price"] != prepared["requested_price"]:
         print(
-            f"  Adjusted {contract.symbol} limit price "
-            f"{original_price:.2f} -> {limit_price:.2f} (tick {tick}) to conform to IBKR."
+            f"  Adjusted {prepared['symbol']} limit price "
+            f"{prepared['requested_price']:.2f} -> {prepared['limit_price']:.2f} "
+            f"(tick {prepared['tick']}) to conform to IBKR."
         )
 
-    order = LimitOrder("BUY", quantity, limit_price)
-    order.account = account_id
+    order = LimitOrder("BUY", prepared["quantity"], prepared["limit_price"])
+    order.account = prepared["account_id"]
     order.tif = "DAY"
 
-    trade = ib.placeOrder(routing_contract, order)
-    return trade
+    return ib.placeOrder(prepared["routing_contract"], order)
+
+
+def place_order(ib, contract, quantity, account_id, limit_price):
+    """Prepare and send in one step, for callers that do not pre-flight."""
+    return place_prepared_order(
+        ib, prepare_order(ib, contract, quantity, account_id, limit_price)
+    )
 
 

@@ -12,23 +12,6 @@ Built with Python 3.10+, FastAPI + SSE, ib_async, IBC for Gateway login. Runs lo
 
 # 🔥 Now
 
-## Make an account all or nothing (M)
-
-Pension filled VUAA and IMAE while EGLN was cancelled by Error 478, which leaves the account
-off its target weights until the next run corrects it. Philip wants a Pension run to be all
-or nothing: either every leg goes through or none does, so the percentages stay right and a
-re-run does not compound the imbalance.
-True atomicity is not available at IBKR across separate instruments, so the aim is to move
-every knowable failure in front of the first order, and to contain the rest.
-Done when: a Pension run cannot end with some legs bought and others not, without the
-dashboard saying so loudly.
-
-- [ ] Pre-flight every leg before placing any of them: routing contract resolves, limit price conforms to tick, cash covers the whole plan at limit prices (M)
-- [ ] Place nothing for that account if any pre-flight check fails, and say which leg failed (S)
-- [ ] If a leg is still rejected after placement, cancel the account's remaining unfilled orders (M)
-- [ ] Report the resulting imbalance explicitly rather than leaving it to be noticed (S)
-- [ ] Decide whether a partially filled account should block the next run until acknowledged (S)
-
 ## Give the run error boundaries (M)
 
 `main.py` catches one exception type for the whole run and the account loop has no per-account
@@ -99,6 +82,32 @@ Done when: an unfilled order is re-priced and retried a bounded number of times,
 ---
 
 # ✅ Done
+
+## Pre-flight an account before ordering (M)
+
+Pension filled VUAA and IMAE while EGLN was cancelled by Error 478, leaving the account off
+its target weights. An account's legs are placed together, so every knowable failure now
+happens in front of the first order and the account places nothing if any leg fails.
+Decision (Philip, 2026-10-01): pre-flight only. Sequential placement with stop-on-failure was
+considered and declined: it costs up to two minutes per leg and lets the price drift between
+them, and pre-flight already catches the failures that are knowable in advance.
+Done when: a leg that can be known to fail cannot leave the rest of the account bought.
+
+- [x] Split `prepare_order` from `place_prepared_order` so legs resolve without being sent (S)
+- [x] Resolve every routing contract up front, which catches Error 478 and the wrong-instrument case (S)
+- [x] Check the plan's total cost at the FINAL tick-snapped prices against real cash, closing the gap where sizing uses the unsnapped price (S)
+- [x] Treat an unreadable cash balance as a pre-flight failure rather than proceeding blind (S)
+- [x] Place nothing for the account on any failure, and name the leg that caused it (S)
+- [x] Surface pre-flight failure in the dashboard, so the card cannot keep a stale "Ready" badge (S)
+- [x] Offline tests for the healthy, unroutable, underfunded, unreadable-cash and independence cases (S)
+- [ ] Confirm live that a full Pension run places all three legs
+
+Remaining, not done here: a leg rejected AFTER placement still leaves a partial. Cancelling
+the account's other unfilled orders in that case is the open part.
+
+- [ ] If a leg is rejected after placement, cancel the account's remaining unfilled orders (M)
+- [ ] Report the resulting imbalance explicitly rather than leaving it to be noticed (S)
+
 
 ## Keep all-or-nothing on the top-up (S)
 

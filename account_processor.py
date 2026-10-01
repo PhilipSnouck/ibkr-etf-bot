@@ -12,7 +12,8 @@ from broker import (
     qualify_etf_contracts,
     get_etf_prices,
     is_contract_open_now,
-    place_order,
+    prepare_order,
+    place_prepared_order,
     calc_limit_price,
     describe_price_failure,
 )
@@ -255,6 +256,80 @@ def print_summary(symbols, actual_pct, totals, account_currency, passes_cash_rul
 
 
 # ------------------------------------------------------------
+# PRE-FLIGHT
+# ------------------------------------------------------------
+def _preflight_account(ib, plan):
+    """
+    Resolve and check every leg of one account before any of them is sent.
+
+    Catches, with nothing bought:
+      - a routing contract that does not resolve to the instrument we priced
+        (Error 478, and the wrong-ETF case that check guards against)
+      - a limit price that cannot be made tick-conforming (Error 110)
+      - a plan whose total cost at the FINAL tick-snapped prices exceeds the
+        account's cash (Error 201). main.py sizes on the unsnapped price, so
+        the snap can add a few cents per share that sizing never saw.
+
+    Returns True when every leg is ready. On failure it prints what went
+    wrong, leaves the account untouched, and returns False.
+
+    Each `order` gains a "prepared" entry when this succeeds.
+    """
+    account_name = plan["account_name"]
+    currency = plan["account_currency"]
+    prepared = []
+    failures = []
+
+    for order in plan["orders"]:
+        try:
+            prepared.append(
+                (
+                    order,
+                    prepare_order(
+                        ib=ib,
+                        contract=order["contract"],
+                        quantity=order["quantity"],
+                        account_id=plan["account_id"],
+                        limit_price=order["limit_price"],
+                    ),
+                )
+            )
+        except Exception as exc:
+            failures.append(f"{order['symbol']}: {exc}")
+
+    if not failures:
+        total_cost = sum(p["cost"] for _, p in prepared)
+        total_needed = total_cost + ORDER_COMMISSION_BUFFER * len(prepared)
+        available = get_account_cash(ib, plan["account_id"], currency=currency)
+
+        if available is None:
+            failures.append(
+                "could not read the account's cash balance, so the plan cannot be checked"
+            )
+        elif total_needed > available:
+            failures.append(
+                f"the plan needs {currency} {total_needed:.2f} at the final limit prices "
+                f"but only {currency} {available:.2f} is available "
+                f"(short {currency} {total_needed - available:.2f})"
+            )
+
+    if failures:
+        print(f"\nPre-flight failed for {account_name}. No orders were placed.")
+        for failure in failures:
+            print(f"  {failure}")
+        print(
+            "Reason for placing nothing: this account's orders go out together, so a "
+            "partial run would leave it off its target weights."
+        )
+        return False
+
+    for order, prep in prepared:
+        order["prepared"] = prep
+
+    return True
+
+
+# ------------------------------------------------------------
 # EXECUTION HELPER
 # ------------------------------------------------------------
 def execute_plan(ib, execution_queue):
@@ -277,15 +352,18 @@ def execute_plan(ib, execution_queue):
         if not plan["orders"]:
             print("No immediate orders to place for this account.")
 
+        # Phase 0: pre-flight. Resolve and check every leg BEFORE sending any
+        # of them. An account's orders go out together, so a leg that IBKR
+        # refuses at placement time used to leave the account holding only the
+        # legs that succeeded, off its target weights, with a re-run
+        # compounding the imbalance. Everything knowable is checked here, and
+        # if any leg fails the account places nothing at all.
+        if plan["orders"] and not _preflight_account(ib, plan):
+            continue
+
         # Phase 1: place all orders simultaneously
         for order in plan["orders"]:
-            trade = place_order(
-                ib=ib,
-                contract=order["contract"],
-                quantity=order["quantity"],
-                account_id=plan["account_id"],
-                limit_price=order["limit_price"],
-            )
+            trade = place_prepared_order(ib, order["prepared"])
             order["trade"] = trade
 
         # Phase 2: wait for all orders to reach a terminal status
