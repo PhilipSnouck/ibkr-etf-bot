@@ -20,6 +20,7 @@ from broker import (
     get_etf_prices,
     is_contract_open_now,
     calc_limit_price,
+    describe_price_failure,
 )
 
 from allocator_registry import get_allocator
@@ -74,8 +75,8 @@ RESET = "\033[0m"
 # ------------------------------------------------------------
 # CONNECT TO IBKR ONCE
 # ------------------------------------------------------------
+# connect_ib prints its own connection line, including clientId and run mode.
 ib = connect_ib()
-print(f"{'IB':<6}: connected")
 
 execution_queue = []
 
@@ -216,6 +217,7 @@ try:
                     f"\nSafety stop: no valid market price available for {symbol} "
                     f"(after delayed streaming retry)."
                 )
+                print(describe_price_failure(symbol, ib=ib))
                 invalid_price_found = True
 
         if invalid_price_found:
@@ -390,7 +392,7 @@ try:
 
 except ConnectionError as e:
     print(f"\nConnection to IBKR lost: {e}")
-    print("Gateway is still running — re-run without needing 2FA again.")
+    print("Gateway is still running - re-run without needing 2FA again.")
 
 finally:
     # ------------------------------------------------------------

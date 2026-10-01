@@ -2,14 +2,14 @@
 
 ## Overview
 
-A Python bot that automates periodic ETF purchases across multiple Interactive Brokers (IBKR) accounts. You run it manually once per period — it calculates how many shares to buy based on available cash and target allocations, then places orders when you explicitly confirm.
+A Python bot that automates periodic ETF purchases across multiple Interactive Brokers (IBKR) accounts. You run it manually once per period - it calculates how many shares to buy based on available cash and target allocations, then places orders when you explicitly confirm.
 
 Operated via a **local web dashboard** (no terminal needed). Double-click the desktop shortcut, open the browser, click Preview → Execute.
 
 Designed to be:
-- **Safe by default** — preview mode shows the full plan before anything is placed
-- **Deterministic** — same inputs always produce the same plan
-- **Transparent** — clean per-account summary cards with allocation details and top-up status
+- **Safe by default** - preview mode shows the full plan before anything is placed
+- **Deterministic** - same inputs always produce the same plan
+- **Transparent** - clean per-account summary cards with allocation details and top-up status
 
 ---
 
@@ -28,19 +28,19 @@ For each configured account, the bot:
 ### Order execution
 
 All orders are **limit orders** placed at `price × (1 + markup)` (default: 0.5% above last price). This means:
-- You pay at or below the limit price — never above it
+- You pay at or below the limit price - never above it
 - The markup gives a small buffer so the order fills even if the price ticks up slightly
 - The limit price is nudged **up** to the nearest price step the exchange allows (each ETF has
   a minimum step, and it can be bigger than one cent). Without this, the exchange rejects the
   order outright: that is what happened to IMAE on 1 September 2026
 - Orders are placed simultaneously across all ETFs in an account
-- The bot waits up to 2 minutes for fills; if an order hasn't confirmed by then it warns you and stops — check TWS before re-running
+- The bot waits up to 2 minutes for fills; if an order hasn't confirmed by then it warns you and stops - check TWS before re-running
 
 ### Code structure
 
 ```
-server.py                # FastAPI server — dashboard API and SSE streaming
-main.py                  # Bot orchestrator — loops through accounts
+server.py                # FastAPI server - dashboard API and SSE streaming
+main.py                  # Bot orchestrator - loops through accounts
 account_processor.py     # Per-account flow and execution logic
 
 broker.py                # IBKR connection, price fetching, order placement
@@ -76,7 +76,7 @@ The logic is intentionally split:
 
 ### 2. Interactive Brokers
 - A live and/or paper trading account
-- IB Gateway running locally (managed automatically via IBC — see below)
+- IB Gateway running locally (managed automatically via IBC - see below)
 - API access enabled in Gateway settings
 - Ports: live `4001`, paper `4002`
 
@@ -106,17 +106,17 @@ The server only runs while that terminal window is open. When you close the brow
 
 ### Dashboard (http://localhost:9000)
 
-**Accounts panel** — shows all configured accounts with their ETFs and target weights.
+**Accounts panel** - shows all configured accounts with their ETFs and target weights.
 
-**Preview all** — runs the bot in preview mode. Shows per-account cards with:
+**Preview all** - runs the bot in preview mode. Shows per-account cards with:
 - Available cash
 - Allocation rows (ticker, shares, price, total, rounding notes)
 - Top-up status messages
 - Cash remaining after allocation
 
-**Execute all** — enabled after a successful preview. Requires the Gateway connection indicator (top right) to be green. Places real orders and updates the cards with fill status.
+**Execute all** - enabled after a successful preview. Requires the Gateway connection indicator (top right) to be green. Places real orders and updates the cards with fill status.
 
-**Raw log toggle** — shows the full bot console output for debugging.
+**Raw log toggle** - shows the full bot console output for debugging.
 
 ### Settings (http://localhost:9000/settings)
 
@@ -185,7 +185,7 @@ The summary card shows status messages as the top-up is processed:
 |---|---|
 | 🔵 Pending top-up loaded | A pending file was found and loaded |
 | 🟠 Pending top-up expired | File was too old and discarded |
-| 🟢 Top-up fully funded — order will be placed | Cash is sufficient, order proceeds |
+| 🟢 Top-up fully funded - order will be placed | Cash is sufficient, order proceeds |
 | 🟠 Top-up not yet fully funded | Still not enough cash |
 | 🟠 Still missing: EUR X.XX | Exact shortfall shown |
 | 🔵 Top-up file saved for next run | New pending file created |
@@ -193,7 +193,7 @@ The summary card shows status messages as the top-up is processed:
 
 ### Key behaviour
 
-- Pending files are **account-specific** — multiple accounts work independently
+- Pending files are **account-specific** - multiple accounts work independently
 - Files **auto-expire** after 7 days (configurable in Settings)
 - The suggested deposit amount uses the **limit price** (not raw price) to match actual required cash
 - Preview mode never creates or modifies pending files
@@ -207,7 +207,7 @@ IBC (IB Controller) automates IB Gateway login so you only need to approve the M
 
 ### One-time setup
 
-1. Download IBC from [https://github.com/IbcAlpha/IBC/releases](https://github.com/IbcAlpha/IBC/releases) — get the Windows release (`IBCWin_x.x.x.zip`)
+1. Download IBC from [https://github.com/IbcAlpha/IBC/releases](https://github.com/IbcAlpha/IBC/releases) - get the Windows release (`IBCWin_x.x.x.zip`)
 2. Extract to a permanent folder (this repo already includes an `IBC/` folder)
 3. Edit `IBC/config.ini` and fill in your credentials:
    ```ini
@@ -225,7 +225,7 @@ If IB Gateway is already running, the bot connects immediately.
 If Gateway is not running, the bot starts it via IBC:
 
 ```
-IB Gateway not running — starting via IBC...
+IB Gateway not running - starting via IBC...
 Approve the 2FA prompt on your phone.
   Waiting for Gateway... (1/10)
   Waiting for Gateway... (2/10)
@@ -244,7 +244,7 @@ Navigating between Dashboard and Settings does not shut down Gateway.
 
 ### Security note
 
-Your IBKR credentials live in `IBC/config.ini` — this file is excluded from git via `.gitignore`.
+Your IBKR credentials live in `IBC/config.ini` - this file is excluded from git via `.gitignore`.
 
 ---
 
@@ -256,10 +256,10 @@ The bot will refuse to execute if any of the following are true:
 |---|---|
 | Preview mode (no Execute clicked) | No orders placed |
 | `execution_mode = "preview"` in config | Orders blocked even if Execute clicked |
-| Price unavailable | Safety stop — account skipped |
-| Contract cannot be qualified | Safety stop — account skipped |
-| Market closed | Blocked — shown in output |
-| Cash below `min_cash_to_execute` | Blocked — shown in output |
+| Price unavailable | Safety stop - account skipped |
+| Contract cannot be qualified | Safety stop - account skipped |
+| Market closed | Blocked - shown in output |
+| Cash below `min_cash_to_execute` | Blocked - shown in output |
 | `planned_allocation_cash > real_cash` (execute mode) | Safety stop |
 | Gateway not connected (green indicator) | Execute button blocked |
 
@@ -267,11 +267,11 @@ The bot will refuse to execute if any of the following are true:
 
 ## Known Limitations
 
-- **No retry for unfilled limit orders** — if a limit order times out (2 min) and remains open at IBKR, the bot warns you and stops. Check TWS before re-running.
-- **No file logging** — all output is streamed to the dashboard. The raw log is visible during the session but not persisted.
-- **No FX handling** — assumes account currency matches ETF currency.
-- **Static commission** — `order_commission_buffer` is a manual setting, not fetched dynamically from IBKR.
-- **Localhost only** — the dashboard runs on your laptop. Phone access requires a VPS (easy migration path when needed).
+- **No retry for unfilled limit orders** - if a limit order times out (2 min) and remains open at IBKR, the bot warns you and stops. Check TWS before re-running.
+- **No file logging** - all output is streamed to the dashboard. The raw log is visible during the session but not persisted.
+- **No FX handling** - assumes account currency matches ETF currency.
+- **Static commission** - `order_commission_buffer` is a manual setting, not fetched dynamically from IBKR.
+- **Localhost only** - the dashboard runs on your laptop. Phone access requires a VPS (easy migration path when needed).
 
 ---
 

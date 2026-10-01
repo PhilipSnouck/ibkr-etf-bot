@@ -8,11 +8,11 @@ http://localhost:9000. Requires IB Gateway (auto-started via IBC) + phone MFA ap
 
 ## Hard rules
 
-- **NEVER open `.env`, `config_store.json`, `pending_topup*.json`, or anything in `../IBC`** —
+- **NEVER open `.env`, `config_store.json`, `pending_topup*.json`, or anything in `../IBC`**:
   they hold real account data and credentials. Document config key names from code only.
 - **This bot places REAL money orders.** Never change order/broker/allocator logic unless
   Philip explicitly asks, and keep the Preview-before-Execute safety model intact.
 
 ## Pointers
-- `README.md` — usage · `DEVELOPER.md` — architecture and internals
-- `ROADMAP.md` — tasks. Format spec: `C:\Users\p.snouckaert\Personal repos\roadmap-dashboard\ROADMAP_TEMPLATE.md`. Always `git pull` before editing it.
+- `README.md` - usage · `DEVELOPER.md` - architecture and internals
+- `ROADMAP.md` - tasks. Format spec: `C:\Users\p.snouckaert\Personal repos\roadmap-dashboard\ROADMAP_TEMPLATE.md`. Always `git pull` before editing it.

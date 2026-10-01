@@ -1,4 +1,4 @@
-# Developer Documentation — IBKR ETF Bot
+# Developer Documentation - IBKR ETF Bot
 
 Technical context for a developer or LLM working on this codebase.
 Usage instructions live in `README.md`; tasks in `ROADMAP.md`.
@@ -6,7 +6,7 @@ Usage instructions live in `README.md`; tasks in `ROADMAP.md`.
 > **This bot places real-money orders on live Interactive Brokers accounts.**
 > Never change order or broker logic unless Philip explicitly asks. Keep the
 > Preview → Execute safety model intact. Never open `.env`, `config_store.json`,
-> `pending_topup*.json`, or anything in `../IBC` — real account data and credentials.
+> `pending_topup*.json`, or anything in `../IBC` - real account data and credentials.
 
 ---
 
@@ -16,7 +16,7 @@ Usage instructions live in `README.md`; tasks in `ROADMAP.md`.
 - **Local:** `C:\Users\p.snouckaert\Personal repos\IBKR-bot-docs\IBKR-etf-bot`
 - **Runs:** localhost only, on Philip's laptop. No deploy pipeline.
 
-**Folder quirk (intentional — never "fix"):** the git repo is this `IBKR-etf-bot`
+**Folder quirk (intentional - never "fix"):** the git repo is this `IBKR-etf-bot`
 folder, nested inside the plain (non-git) parent folder `IBKR-bot-docs`. The parent
 also holds `IBC/` (IB Gateway login config, contains credentials, never open) and
 `dashboard-mockup/` (design scratchpad). Neither is part of the repo.
@@ -29,12 +29,12 @@ also holds `IBC/` (IB Gateway login config, contains credentials, never open) an
 |---|---|---|
 | Language | Python 3.10+ | Plain scripts, no package structure |
 | Server | FastAPI + uvicorn | `server.py`, serves dashboard + SSE |
-| IBKR API | `ib_async` | The maintained fork of ib_insync — `broker.py` imports `ib_async`, not `ib_insync` (docs elsewhere may say ib_insync) |
+| IBKR API | `ib_async` | The maintained fork of ib_insync - `broker.py` imports `ib_async`, not `ib_insync` (docs elsewhere may say ib_insync) |
 | Gateway login | IBC (IB Controller) | `StartGateway.bat` in `../IBC`, auto-started by `broker.connect_ib()` |
 | Frontend | Vanilla HTML/JS, no build step | `dashboard/index.html` + `settings.html`, talk to the API via `fetch` + `EventSource` |
 | Config | `config_store.json` (gitignored) | Single source of truth, edited via Settings page |
 
-Ports: live Gateway `4001` (clientId 2), paper `4002` (clientId 1) — hardcoded in `config.py` `IB_CONNECTIONS`.
+Ports: live Gateway `4001` (clientId 2), paper `4002` (clientId 1) - hardcoded in `config.py` `IB_CONNECTIONS`.
 
 ---
 
@@ -69,7 +69,7 @@ Browser (index.html)
       → execute_plan(): place limit orders via broker.place_order → ib_async → IB Gateway (IBC-launched)
     ← server.py reads stdout line by line, regex-parses it (parse_line) into structured
       SSE events: account_start, cash, allocation, summary, topup, topup_info,
-      execution_result, error, mfa_prompt, done — plus every raw line as {type:"raw"}
+      execution_result, error, mfa_prompt, done - plus every raw line as {type:"raw"}
   ← index.html consumes the events and renders per-account cards
 ```
 
@@ -86,14 +86,14 @@ check the corresponding regex or the card silently loses data (raw log still sho
   AND market open AND the browser-side gates (preview completed with exit 0, Gateway
   indicator green, JS confirm dialog).
 - Server endpoints: `GET /` and `/settings` (pages), `GET/PUT /api/config`,
-  `GET /api/run/{preview|execute}` (SSE), `POST /api/shutdown` (taskkills IBGateway.exe —
+  `GET /api/run/{preview|execute}` (SSE), `POST /api/shutdown` (taskkills IBGateway.exe  - 
   fired by `navigator.sendBeacon` on tab close so the nightly Gateway restart can't trigger a stray MFA).
 
 ---
 
 ## Configuration
 
-All runtime settings live in `config_store.json` (gitignored — **never open it**, it holds
+All runtime settings live in `config_store.json` (gitignored - **never open it**, it holds
 real account IDs and cash amounts). Read fresh by each bot subprocess via `config.py`
 (import-time load) and read/written by the Settings page through `/api/config`.
 
@@ -135,13 +135,41 @@ Per-account keys (from `main.py`/`rules.py`): `enabled`, `allocator`, `currency`
   cash below `min_cash_to_execute`, market closed for any ETF with shares > 0.
 - **Fill wait**: after placing all orders for an account simultaneously, `execute_plan`
   polls up to 120 s for terminal statuses (`Filled/Cancelled/ApiCancelled/Inactive`).
-  On timeout it **warns and stops — it does not cancel** the open order. A timed-out DAY
+  On timeout it **warns and stops - it does not cancel** the open order. A timed-out DAY
   order can still fill later at IBKR. Always check TWS before re-running execute.
 - **Top-up files**: `pending_topup_{account}.json` is saved/cleared only when all orders
   in that run filled; preview never touches these files. Files expire after
   `max_pending_topup_age_days`.
 - Prices come from **delayed data** (`reqMarketDataType(3)`), warm-up pass + real pass.
   The markup buffer is what makes delayed-price limits fill anyway.
+  There is **no fallback**: if either ETF in an account has no price, the whole account is
+  skipped. A missing price is therefore a hard stop, not a degraded run.
+
+### Price diagnostics (`price_diagnostics.py`)
+
+Observation only. It never changes which price the bot uses and never rescues a failed
+fetch. It exists because "no valid market price available for VUAA" is unfalsifiable on its
+own, and debugging it repeatedly cost whole sessions.
+
+- A single `DIAG` collector is attached to `ib.errorEvent` inside `connect_ib`, **before**
+  `reqMarketDataType` and before any settling sleep. The market data farm messages
+  (2104 / 2106 / 2158) land in exactly that window and are the thing worth capturing.
+- Every fetch prints one summary line showing, per symbol, the price, the data type
+  actually received (live / frozen / delayed / delayed-frozen) and which field it came
+  from (`marketPrice`, `last`, or the bid/ask midpoint). Successful runs record this too,
+  so a later regression can be diagnosed by comparison.
+- Every failure prints a full `PRICE DIAGNOSTIC` block: contract, local time, market hours
+  (looked up on failure only), connection parameters including **clientId and run mode**,
+  per-pass ticker fields, the IBKR messages for that contract, farm status, and a
+  plain-language explanation of each code seen.
+- **Message ordering uses a sequence counter, not timestamps.** Several messages routinely
+  share a millisecond, and the question "did the farm report OK *before* we asked for
+  prices" has to be answerable exactly. That comparison is what separates "Gateway's data
+  session was not ready" from "the account is not entitled to this venue", which both
+  surface as Error 354 and are otherwise indistinguishable.
+- `clientId` and run mode are in the report because preview and execute are **separate
+  processes that reconnect on the same clientId** (`config.py` → `IB_CONNECTIONS`), which
+  is a live suspect for execute-only price failures.
 
 ---
 
@@ -149,7 +177,7 @@ Per-account keys (from `main.py`/`rules.py`): `enabled`, `allocator`, `currency`
 
 1. Double-click the **IBKR ETF Bot** desktop shortcut (or `IBKR_dashboard.bat`):
    starts `python -m uvicorn server:app --port 9000` in a cmd window and opens http://localhost:9000.
-2. Click **Preview all** — if Gateway isn't running, IBC starts it; approve MFA on phone
+2. Click **Preview all** - if Gateway isn't running, IBC starts it; approve MFA on phone
    (connect retries ~10 × 5 s, plus 15 s market-data warm-up after a fresh start).
 3. Click **Execute all** (only enabled after a clean preview + green Gateway indicator).
 4. Close the tab → beacon to `/api/shutdown` kills IBGateway.exe.
@@ -171,10 +199,10 @@ configured ETF's limit price conforms to the tick IBKR enforces on SMART.
 - There is **no double-run guard**: re-running Execute after a timeout can double-buy if
   the earlier order is still open (open orders don't reduce reported cash). The planned
   retry feature in ROADMAP.md must confirm cancellation before re-placing.
-- `config.py` loads at import time — fine for the bot (fresh subprocess per run), but any
+- `config.py` loads at import time - fine for the bot (fresh subprocess per run), but any
   long-lived import of `config` won't see Settings changes.
 - The pension allocator assumes exactly 3 ETFs and that the dict order in config is
   ETF1/ETF2/ETF3 (ETF3 is the remainder/top-up leg). Joint/otto assume exactly 1.
-- Dashboard "execute" still does nothing if `execution_mode` is `"preview"` in config —
+- Dashboard "execute" still does nothing if `execution_mode` is `"preview"` in config  - 
   that's a feature (kill switch), not a bug.
-- `__pycache__/` contains stale compiled modules (e.g. an old `allocator.py`) — ignore it.
+- `__pycache__/` contains stale compiled modules (e.g. an old `allocator.py`) - ignore it.

@@ -14,6 +14,7 @@ from broker import (
     is_contract_open_now,
     place_order,
     calc_limit_price,
+    describe_price_failure,
 )
 
 from pending_topup import (
@@ -89,6 +90,7 @@ def process_pending_topup(
             f"\nSafety stop: no valid market price available for pending ETF "
             f"{pending_symbol} (after delayed streaming retry)."
         )
+        print(describe_price_failure(pending_symbol, ib=ib))
         print("Pending top-up file has been kept.")
         return True
 
@@ -314,7 +316,7 @@ def execute_plan(ib, execution_queue):
         if timed_out:
             print("\nWarning: the following orders did not confirm within 2 minutes:")
             for o in timed_out:
-                print(f"  {o['symbol']}: status '{o['final_status']}' — may still be open at IBKR.")
+                print(f"  {o['symbol']}: status '{o['final_status']}' - may still be open at IBKR.")
             print("Check TWS before re-running the bot.")
 
         if plan["orders"]:

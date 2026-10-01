@@ -1,4 +1,4 @@
-# IBKR ETF Bot — Roadmap
+# IBKR ETF Bot - Roadmap
 
 Python bot that automates periodic ETF purchases across multiple Interactive Brokers accounts.
 Run manually once per period via a local web dashboard: Preview → Execute. Safe by default, deterministic, transparent.
@@ -12,7 +12,34 @@ Built with Python 3.10+, FastAPI + SSE, ib_async, IBC for Gateway login. Runs lo
 
 # 🔥 Now
 
-*(nothing active right now)*
+## Diagnose VUAA price failure (M)
+
+Preview All prices VUAA fine, Execute All fails it with Error 354 and aborts the whole
+Pension account. Preview and execute are separate processes that reconnect to Gateway on
+the same clientId, so the leading theory is that the market data session is not ready on
+the second connection, not that an entitlement is missing. Diagnostics are now in place to
+settle it from the log instead of by guesswork.
+Done when: a failed run names its own cause, and a fix is confirmed by a clean execute.
+
+- [x] Record IBKR messages, farm status, per-pass ticker fields and connection setup (S)
+- [ ] Run Preview then Execute and read the PRICE DIAGNOSTIC block (S)
+- [ ] If no farm status precedes the fetch: give preview and execute separate clientIds (S)
+- [ ] If farm status precedes the fetch: entitlement is genuinely missing, decide venue vs subscription (M)
+- [ ] Restore a fallback pass so one missing price no longer aborts an account (M)
+
+## Fix cash rejection on execute (S)
+
+IBKR rejected a Samen investeren order with Error 201: settled cash 4261.40, needed
+4280.90. The allocators size shares against the raw price, while the order is placed at
+price x (1 + markup) rounded up to tick, so a plan can exceed available cash by roughly the
+markup. `main.py` and the pending top-up path already compute against the limit price, only
+the allocators do not. It fires whenever the leftover after flooring is under ~0.5% of the
+order, which is why it looks intermittent.
+Done when: no plan can produce an order costing more cash than the account holds.
+
+- [ ] Size shares against `calc_limit_price(price, markup)` in all three allocators (S)
+- [ ] Decide whether `get_account_cash` should read `SettledCash` rather than `TotalCashValue` (S)
+- [ ] Offline regression test covering the near-exact-cash case (S)
 
 ---
 
@@ -24,31 +51,31 @@ The dashboard runs on localhost only, so the bot can only be used at the laptop.
 Move it to an always-on machine so Philip can run Preview → Execute from his phone browser.
 Decision needed first: which host. Done when: Philip can open the dashboard and execute a run from his phone.
 
-- [ ] Decide host: VPS (e.g. Hetzner/DigitalOcean) vs Raspberry Pi vs Mac mini — weigh cost, uptime, MFA/Gateway reliability, and whether IB Gateway runs well on it
+- [ ] Decide host: VPS (e.g. Hetzner/DigitalOcean) vs Raspberry Pi vs Mac mini - weigh cost, uptime, MFA/Gateway reliability, and whether IB Gateway runs well on it
 - [ ] Provision the chosen host and install Python + dependencies + IBC + IB Gateway
 - [ ] Get IB Gateway + IBC running headless on the host (no desktop session)
 - [ ] Bind the FastAPI server to the network; put it behind HTTPS + auth (reverse proxy or Tailscale)
-- [ ] Lock down access — never expose the dashboard or Gateway API to the open internet without auth
+- [ ] Lock down access - never expose the dashboard or Gateway API to the open internet without auth
 - [ ] Test full Preview → Execute round-trip from the phone, including the MFA approval flow
 - [ ] Document the host setup and restart procedure in README
 
 ## Retry for unfilled limit orders (M)
 
-Currently if a limit order times out (2 min) and stays open at IBKR, the bot warns and stops — Philip must check TWS manually.
+Currently if a limit order times out (2 min) and stays open at IBKR, the bot warns and stops - Philip must check TWS manually.
 Add a controlled retry so a near-miss fill doesn't require manual intervention.
 Done when: an unfilled order is re-priced and retried a bounded number of times, then reported clearly.
 
 - [ ] Detect the open/unfilled order after timeout
 - [ ] Cancel and re-place at an updated limit price (bounded markup)
 - [ ] Cap retries; surface final state in the dashboard card
-- [ ] Never double-place — confirm cancellation before re-placing
+- [ ] Never double-place - confirm cancellation before re-placing
 
 ---
 
 # 🔮 Future
 
 - [ ] Scheduled / automated runs (M)
-  Let the bot run on a schedule (e.g. monthly) instead of manual trigger only. Depends on always-on host being in place first. Keep the preview-then-execute safety model — auto-execute needs careful guardrails.
+  Let the bot run on a schedule (e.g. monthly) instead of manual trigger only. Depends on always-on host being in place first. Keep the preview-then-execute safety model - auto-execute needs careful guardrails.
 
 - [ ] Dynamic commission from IBKR (S)
   `order_commission_buffer` is a manual static setting. Fetch the real commission from IBKR instead of reserving a fixed EUR amount per order.
@@ -56,6 +83,24 @@ Done when: an unfilled order is re-priced and retried a bounded number of times,
 ---
 
 # ✅ Done
+
+## Market data diagnostics (S)
+
+Every price failure used to surface as one line, "no valid market price available for X",
+which said nothing about whether IBKR refused the request, sent an empty tick, or was not
+ready yet. Each occurrence cost a round of guesswork between market hours, entitlements and
+Gateway state. A failed fetch now prints the contract, the connection (clientId and run
+mode), market hours, the per-pass ticker fields, the IBKR messages received, the market data
+farm status, and what each code means. Observation only: it never changes which price the
+bot uses.
+Done when: a failed fetch is diagnosable from the log alone.
+
+- [x] `price_diagnostics.py` collector attached to `errorEvent` at connect, before any sleep (S)
+- [x] Capture farm status codes and compare their order against the fetch, which separates "data session not ready" from "not entitled" (S)
+- [x] Per-pass record of marketPrice / last / bid / ask / close and the data type actually received (S)
+- [x] One summary line on every fetch showing the data type and quote field each price came from (S)
+- [x] Plain-language hints for 354, 300, 201, 110, 326 and the other codes this bot hits (S)
+- [x] Offline simulation of both failure shapes, no Gateway needed (S)
 
 ## Tick-conforming limit prices (S)
 
@@ -73,11 +118,11 @@ Done when: no ETF in the config can produce a non-conforming limit price.
 
 ## Core bot engine (L)
 - [x] Per-account flow: connect → read cash → fetch prices → allocate → check rules → preview → execute
-- [x] Allocator / Rules / Broker split — what to buy / whether to buy / how to buy
+- [x] Allocator / Rules / Broker split - what to buy / whether to buy / how to buy
 - [x] Allocator registry mapping names to strategy functions
 - [x] Pension allocator (3 ETFs by target weight, rounding rules)
 - [x] Joint + Otto allocators (100% into a single ETF)
-- [x] Deterministic — same inputs always produce the same plan
+- [x] Deterministic - same inputs always produce the same plan
 
 ## Order execution (M)
 - [x] Limit orders at price × (1 + markup), default 0.5% buffer
@@ -96,10 +141,10 @@ Done when: no ETF in the config can produce a non-conforming limit price.
 ## Web dashboard (L)
 - [x] FastAPI server with SSE streaming of bot output
 - [x] Accounts panel showing ETFs and target weights
-- [x] Preview all — per-account cards (cash, allocation rows, top-up status, remaining cash)
-- [x] Execute all — enabled after successful preview, gated on green Gateway indicator
+- [x] Preview all - per-account cards (cash, allocation rows, top-up status, remaining cash)
+- [x] Execute all - enabled after successful preview, gated on green Gateway indicator
 - [x] Raw log toggle for debugging
-- [x] Settings page — edit all config without touching code
+- [x] Settings page - edit all config without touching code
 - [x] `IBKR_dashboard.bat` desktop shortcut launches server + opens browser
 
 ## IBC / Gateway integration (M)
@@ -121,8 +166,8 @@ Done when: no ETF in the config can produce a non-conforming limit price.
 
 ### Code structure
 ```
-server.py                # FastAPI server — dashboard API and SSE streaming
-main.py                  # Bot orchestrator — loops through accounts
+server.py                # FastAPI server - dashboard API and SSE streaming
+main.py                  # Bot orchestrator - loops through accounts
 account_processor.py     # Per-account flow and execution logic
 broker.py                # IBKR connection, price fetching, order placement
 rules.py                 # Config-driven rule evaluation
@@ -138,9 +183,9 @@ IBKR_dashboard.bat      # Double-click to start server + open browser
 ### Known limitations (current)
 - No retry for unfilled limit orders (see Next Build)
 - No persistent file logging
-- No FX handling — assumes account currency matches ETF currency
+- No FX handling - assumes account currency matches ETF currency
 - Static commission buffer, not fetched from IBKR (see Future)
-- Localhost only — phone access needs an always-on host (see Next Build)
+- Localhost only - phone access needs an always-on host (see Next Build)
 
 ### Ports
 Live Gateway `4001`, paper `4002`. API access must be enabled in Gateway settings.
@@ -149,5 +194,5 @@ Live Gateway `4001`, paper `4002`. API access must be enabled in Gateway setting
 ```bash
 pip install -r requirements.txt
 # Double-click "IBKR ETF Bot" desktop shortcut (or run IBKR_dashboard.bat)
-# Opens http://localhost:9000 — Preview → Execute
+# Opens http://localhost:9000 - Preview → Execute
 ```

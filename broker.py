@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from ib_async import IB, Stock, LimitOrder
 from config import IB_CONNECTIONS, IB_ENVIRONMENT, IBC_SCRIPT_PATH
+from price_diagnostics import DIAG
 
 
 # ------------------------------------------------------------
@@ -18,6 +19,11 @@ from config import IB_CONNECTIONS, IB_ENVIRONMENT, IBC_SCRIPT_PATH
 # ------------------------------------------------------------
 _MAX_CONNECT_ATTEMPTS = 10
 _CONNECT_RETRY_DELAY  = 5  # seconds
+
+# IBKR market data type the bot asks for: 3 = delayed.
+# Named rather than inlined so the diagnostics can report what was requested
+# alongside what was actually received.
+REQUESTED_MARKET_DATA_TYPE = 3
 
 
 def connect_ib():
@@ -62,14 +68,34 @@ def connect_ib():
 
     ib_log.setLevel(orig_level)
 
+    # Start recording diagnostics immediately, BEFORE the market data type is
+    # set and before any settling sleep. The market data farm status messages
+    # (2104 / 2106 / 2158) arrive in exactly that window, and whether they
+    # arrive before the first price request is the key signal when a fetch
+    # later fails with Error 354.
+    DIAG.on_connect(
+        ib,
+        env=IB_ENVIRONMENT,
+        host=connection["host"],
+        port=connection["port"],
+        client_id=connection["client_id"],
+        attempts=attempt,
+        gateway_started=gateway_started,
+    )
+
     # Use delayed data if live market data is unavailable
-    ib.reqMarketDataType(3)
+    ib.reqMarketDataType(REQUESTED_MARKET_DATA_TYPE)
 
     # After a fresh IBC-triggered start, give Gateway extra time to establish
     # its market data connections before the bot starts requesting prices.
     if gateway_started:
         print("  Gateway initializing market data connections...")
         time.sleep(15)
+
+    # Record the connection's own parameters in the run log. clientId and
+    # mode in particular matter: preview and execute are separate processes
+    # that reconnect on the same clientId, and that is visible here.
+    print(DIAG.connection_line())
 
     return ib
 
@@ -119,20 +145,23 @@ def get_ticker_price(ticker):
     2. last
     3. midpoint of bid/ask
 
-    Returns float or None.
+    Returns (price, source) where source names which of the three was used,
+    or (None, None) when the ticker carried no usable price. The source is
+    reported in the run log so a filled order can always be traced back to
+    the kind of quote it was priced from.
     """
     candidates = []
 
     try:
         mp = ticker.marketPrice()
         if mp is not None and isfinite(mp) and mp > 0:
-            candidates.append(mp)
+            candidates.append((mp, "marketPrice"))
     except Exception:
         pass
 
     try:
         if ticker.last is not None and isfinite(ticker.last) and ticker.last > 0:
-            candidates.append(ticker.last)
+            candidates.append((ticker.last, "last"))
     except Exception:
         pass
 
@@ -141,11 +170,11 @@ def get_ticker_price(ticker):
             ticker.bid is not None and isfinite(ticker.bid) and ticker.bid > 0 and
             ticker.ask is not None and isfinite(ticker.ask) and ticker.ask > 0
         ):
-            candidates.append((ticker.bid + ticker.ask) / 2)
+            candidates.append(((ticker.bid + ticker.ask) / 2, "bid/ask midpoint"))
     except Exception:
         pass
 
-    return candidates[0] if candidates else None
+    return candidates[0] if candidates else (None, None)
 
 
 def _normalize_contracts(contracts):
@@ -164,18 +193,23 @@ def _safe_cancel_market_data(ib, tickers):
             pass
 
 
-def _request_prices_once(ib, contract_list, wait_seconds=2.0):
+def _request_prices_once(ib, contract_list, wait_seconds=2.0, pass_name="pass"):
     """
     Request delayed streaming prices once.
-    Returns {symbol: price_or_None}.
+    Returns {symbol: (price_or_None, source_or_None)}.
+
+    Every ticker is handed to the diagnostics collector before its
+    subscription is cancelled, so a later failure report can show exactly
+    which fields IBKR populated on each pass.
     """
     prices = {}
 
-    ib.reqMarketDataType(3)
+    ib.reqMarketDataType(REQUESTED_MARKET_DATA_TYPE)
     tickers = [ib.reqMktData(contract, "", False, False) for contract in contract_list]
     ib.sleep(wait_seconds)
 
     for contract, ticker in zip(contract_list, tickers):
+        DIAG.record_pass(pass_name, contract.symbol, ticker, wait_seconds)
         prices[contract.symbol] = get_ticker_price(ticker)
 
     _safe_cancel_market_data(ib, tickers)
@@ -196,14 +230,43 @@ def get_etf_prices(ib, contracts):
     """
     contract_list = _normalize_contracts(contracts)
 
+    DIAG.start_fetch(contract_list, REQUESTED_MARKET_DATA_TYPE)
+
     # Warm-up pass
-    _ = _request_prices_once(ib, contract_list, wait_seconds=1.5)
+    _ = _request_prices_once(
+        ib, contract_list, wait_seconds=1.5, pass_name="pass 1 warm-up"
+    )
     ib.sleep(0.5)
 
     # Real pass
-    prices = _request_prices_once(ib, contract_list, wait_seconds=2.0)
+    detailed = _request_prices_once(
+        ib, contract_list, wait_seconds=2.0, pass_name="pass 2 real"
+    )
+
+    prices = {}
+
+    for symbol, (price, source) in detailed.items():
+        DIAG.record_result(symbol, price, source)
+        prices[symbol] = price
+
+    # One line per fetch, on success as well as failure. A run that worked
+    # still records which data type and which quote field it priced from,
+    # which is what makes a later regression diagnosable by comparison.
+    summary = DIAG.summary_line()
+
+    if summary:
+        print(summary)
 
     return prices
+
+
+def describe_price_failure(symbol, ib=None):
+    """
+    Full explanation of why `symbol` has no price: contract, connection,
+    market hours, per-pass ticker fields, the IBKR messages received, the
+    market data farm status, and what the codes mean.
+    """
+    return DIAG.describe_failure(symbol, ib=ib)
 
 # ------------------------------------------------------------
 # GET CONTRACT DETAILS
