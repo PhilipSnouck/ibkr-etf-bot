@@ -48,12 +48,15 @@ ERROR_CODE_HINTS = {
     354: (
         "IBKR refused the market data subscription for this contract.\n"
         "      Two very different causes produce this same code:\n"
-        "      (a) the account genuinely has no entitlement for this venue, or\n"
+        "      (a) the account has no entitlement for this venue, or\n"
         "      (b) Gateway's market data session was not established for this\n"
-        "          client when the request went out - typically on a reconnect\n"
-        "          shortly after another client session disconnected.\n"
-        "      Use the farm status section below to tell (a) from (b): if no\n"
-        "      farm 'connection is OK' message arrived before the fetch, it is (b)."
+        "          client when the request went out.\n"
+        "      Read the 'Other symbols in this SAME fetch' verdict first: it is\n"
+        "      the reliable test. If any peer priced on the same connection, the\n"
+        "      session was up and this is (a).\n"
+        "      Two further tells for (a): 'type received' says delayed/live rather\n"
+        "      than 'none received' (IBKR answered the request, then refused the\n"
+        "      data), and every field including close is empty."
     ),
     10167: "No live data for this contract, so delayed data was served instead. Informational.",
     10168: "Delayed data was requested but is not available for this contract.",
@@ -139,10 +142,28 @@ class PriceDiagnostics:
     # --------------------------------------------------------
     # CONNECTION
     # --------------------------------------------------------
-    def on_connect(self, ib, env, host, port, client_id, attempts, gateway_started):
+    def attach(self, ib):
+        """
+        Subscribe to IBKR messages BEFORE ib.connect() runs.
+
+        The market data farm status messages (2104 / 2106 / 2158) arrive
+        during the connect handshake itself. Attaching afterwards misses them
+        entirely and makes the farm section report 'NONE SEEN' on a perfectly
+        healthy connection, which is actively misleading.
+        """
         self.connect_monotonic = time.monotonic()
         self.messages = []
         self._seq = 0
+        self.fetch_start_seq = 0
+
+        if self._subscribed_to is not ib:
+            ib.errorEvent += self._on_ib_message
+            self._subscribed_to = ib
+
+    def on_connect(self, ib, env, host, port, client_id, attempts, gateway_started):
+        if self.connect_monotonic is None:
+            self.connect_monotonic = time.monotonic()
+
         self.connection_info = {
             "env": env,
             "host": host,
@@ -153,9 +174,10 @@ class PriceDiagnostics:
             "mode": "execute" if _is_execute_run() else "preview",
         }
 
-        # Subscribe once per IB instance. Registering the handler twice would
-        # duplicate every message in the report and make a single 354 look
-        # like a repeated failure.
+        # Normally already subscribed by attach(). This is a safety net for
+        # any caller that connects without calling attach() first; it is
+        # guarded so the handler can never be registered twice, which would
+        # duplicate every message and make one 354 look like several.
         if self._subscribed_to is not ib:
             ib.errorEvent += self._on_ib_message
             self._subscribed_to = ib
@@ -316,6 +338,7 @@ class PriceDiagnostics:
                 f"close={_num(fields.get('close'))}"
             )
 
+        lines.extend(self._peer_section(symbol))
         lines.extend(self._message_section(symbol))
         lines.extend(self._farm_section())
         lines.extend(self._hint_section(symbol))
@@ -324,6 +347,63 @@ class PriceDiagnostics:
         lines.append("")
 
         return "\n".join(lines)
+
+    def _peer_section(self, symbol):
+        """
+        What the OTHER symbols in the same fetch did.
+
+        This is the strongest discriminator available and it costs nothing:
+        the peers shared one connection, one data session and one moment in
+        time. If they priced and this one did not, nothing about the
+        connection can explain the failure, and the cause has to be specific
+        to this contract or venue.
+        """
+        peers = {s: r for s, r in self.results.items() if s != symbol}
+
+        if not peers:
+            return []
+
+        lines = ["", "Other symbols in this SAME fetch (same connection, same moment):"]
+
+        priced = []
+
+        for peer, (price, source) in peers.items():
+            peer_passes = self.passes.get(peer, [{}])
+            type_name = _data_type_name(peer_passes[-1].get("data_type"))
+            contract = self.contracts.get(peer)
+            venue = getattr(contract, "exchange", "?")
+
+            if price is None:
+                lines.append(f"  {peer:6} on {venue:10} NO PRICE")
+            else:
+                priced.append(peer)
+                lines.append(f"  {peer:6} on {venue:10} {price:10.2f}  ({type_name}, {source})")
+
+        lines.append("")
+
+        if priced:
+            failed_venue = getattr(self.contracts.get(symbol), "exchange", "?")
+            lines.append(
+                f"  VERDICT: {', '.join(priced)} priced normally on this exact connection,"
+            )
+            lines.append(
+                "  so the market data session was up and working. The failure is specific"
+            )
+            lines.append(
+                f"  to {symbol} on {failed_venue}, which means an entitlement or contract"
+            )
+            lines.append(
+                "  problem for that venue, NOT connection timing or Gateway state."
+            )
+        else:
+            lines.append(
+                "  VERDICT: nothing in this fetch priced. That points at the connection"
+            )
+            lines.append(
+                "  or data session rather than at any single contract."
+            )
+
+        return lines
 
     def _market_hours(self, ib, contract):
         try:
@@ -367,18 +447,15 @@ class PriceDiagnostics:
         ]
 
         if not farm:
-            lines.append("  NONE SEEN.")
+            lines.append("  None recorded.")
             lines.append(
-                "  IBKR normally reports 'Market data farm connection is OK' shortly"
+                "  Weak evidence on its own: these messages arrive during the connect"
             )
             lines.append(
-                "  after connecting. If nothing arrived before the fetch, the data"
+                "  handshake and can be missed. Trust the peer-symbol verdict above"
             )
             lines.append(
-                "  session was not ready, and a 354 here means 'not ready yet'"
-            )
-            lines.append(
-                "  rather than 'not subscribed'."
+                "  instead, which does not depend on catching them."
             )
             return lines
 

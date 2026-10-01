@@ -31,6 +31,12 @@ def connect_ib():
     connection = IB_CONNECTIONS[IB_ENVIRONMENT]
     gateway_started = False
 
+    # Subscribe to IBKR messages before connecting. The market data farm
+    # status messages arrive during the handshake itself, so attaching after
+    # ib.connect() returns misses them and makes a healthy connection look
+    # like one that never brought its data session up.
+    DIAG.attach(ib)
+
     ib_log = logging.getLogger('ib_async')
     orig_level = ib_log.level
 
