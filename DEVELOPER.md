@@ -130,10 +130,28 @@ Per-account keys (from `main.py`/`rules.py`): `enabled`, `allocator`, `currency`
   exchange and `exchange = "SMART"`, which avoids Error 10311 from Gateway precautionary
   settings (which reset on every Gateway restart).
 - **Guards in place_order**: quantity > 0 and limit_price > 0 or ValueError.
+- **Order routing**: `build_routing_contract` sends `conId` + `exchange="SMART"` + currency and
+  nothing else. SMART is a routing destination, not an instrument chooser, and `conId` is
+  IBKR's unique key. Copying the qualified contract and swapping only the exchange used to
+  carry `localSymbol` and `tradingClass` from the listing venue, which IBKR rejected with
+  Error 478. The routed contract is re-qualified and the order is refused unless conId,
+  symbol and currency all match the contract that was priced.
+- **Pre-flight** (`_preflight_account`): an account's legs are placed together, so a leg that
+  fails at placement time would leave the account off its target weights. `prepare_order`
+  resolves and checks every leg without sending it, and `execute_plan` places **nothing** for
+  an account where any leg fails. It catches an unresolvable routing contract, a
+  non-conforming price, a plan whose total cost **at the final tick-snapped prices** exceeds
+  real cash (the sizing in `main.py` uses the unsnapped price, so the snap can add cents per
+  share it never saw), and an unreadable cash balance. A failed pre-flight skips that account
+  only; the others still run. `server.py` parses the failure line so the dashboard cannot
+  leave a stale "Ready" badge on an account that bought nothing.
+  A leg rejected **after** placement still leaves a partial. Sequential placement with
+  stop-on-failure was declined (see ROADMAP): it costs up to two minutes per leg and lets the
+  price drift between them.
 - **Safety stops** (account skipped, nothing placed): cash unreadable, contract won't
   qualify, price missing/≤ 0, `planned_allocation_cash > real_cash` in execute mode,
   cash below `min_cash_to_execute`, market closed for any ETF with shares > 0.
-- **Fill wait**: after placing all orders for an account simultaneously, `execute_plan`
+- **Fill wait**: after pre-flight passes and all orders for an account are placed simultaneously, `execute_plan`
   polls up to 120 s for terminal statuses (`Filled/Cancelled/ApiCancelled/Inactive`).
   On timeout it **warns and stops - it does not cancel** the open order. A timed-out DAY
   order can still fill later at IBKR. Always check TWS before re-running execute.
