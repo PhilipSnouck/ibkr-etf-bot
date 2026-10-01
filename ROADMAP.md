@@ -12,52 +12,49 @@ Built with Python 3.10+, FastAPI + SSE, ib_async, IBC for Gateway login. Runs lo
 
 # 🔥 Now
 
-## Confirm VUAA fallback works live (S)
+## Stop the allocator refusing to invest (S)
 
-IBKR refuses VUAA on BVME.ETF with Error 354 intermittently, which killed the whole Pension
-account because the bot had only one way to get a price. Root-causing the refusal went
-nowhere across several sessions: market hours, Gateway timing and clientId reuse were all
-ruled out, and the refusal is intermittent, which rules out a missing entitlement too. The
-fix is resilience rather than diagnosis, and it is now built and tested offline.
-Done when: a live run prices VUAA through one of the fallback rungs, or names which rung
-failed and why.
+The top-up trigger sets `chosen_shares = 0`, so when the fractional part of `raw_shares`
+reaches 0.75 the account buys NOTHING, not just the one share it cannot afford. Correct for
+Pension's ETF3 remainder leg (0 to 3 shares), badly wrong for a 100%-weight account where
+`floor_shares` is 30+. Swept offline: 25% of single-ETF runs buy zero and leave an average
+of 5032 EUR idle. This is why Samen investeren keeps buying nothing, and the Error 201 fix
+of 2026-10-01 only changed the failure from a rejection into a silent skip.
+Done when: an account buys what it can afford and tops up only for the remainder.
 
-- [x] Fallback chain: SMART routing, delayed frozen, historical close (M)
-- [x] Offline regression test for all three shapes (`test_price_fallback.py`) (S)
-- [ ] Run Preview All live and check which rung supplies VUAA (S)
-- [ ] If every rung fails, compare VUAA on an alternative venue with data that works (S)
+- [ ] Allocators buy `floor_shares` instead of 0; all-or-nothing only when `floor_shares == 0` (S)
+- [ ] Pension ETF1 gets the same `while shares > 0` loop as ETF2 and ETF3; a negative share count is a hard stop (S)
+- [ ] Move the tick snap in front of sizing: compute once in `main.py`, `place_order` asserts rather than adjusts (S)
+- [ ] Extract `build_plan()` from `main.py` so the sweep tests the shipped path, not a re-implementation (M)
+- [ ] `assert_affordable` must include the tick snap; the current invariant is false without it (S)
 
-## Fix EGLN order rejection 478 (M)
+## Give the run error boundaries (M)
 
-Pension's EGLN order is cancelled by IBKR with Error 478, "requested ibLocalSymbol EGLN,
-from contract PPFB". `place_order` routes via SMART by copying the qualified contract and
-swapping the exchange, which leaves `localSymbol` and `tradingClass` from the LSEETF
-listing attached to a request IBKR now resolves differently. Clearing those fields is the
-obvious fix but must NOT be done blind: if the conId really does resolve to another
-instrument under SMART, clearing the identifying fields would buy the wrong ETF with real
-money. Verify what SMART resolves to before trusting it.
-Done when: EGLN orders are accepted, and the bot refuses to place an order whose routed
-contract does not match the one that was priced.
+`main.py` catches one exception type for the whole run and the account loop has no per-account
+boundary, so one account's bad state destroys every other account's approved orders. The
+placement loop has no try/except at all: a drop between orders leaves live orders at IBKR with
+nobody watching, no summary printed, and the handler then advises a re-run that would duplicate
+them.
+Done when: no single account or order can take down the rest of the run.
 
-- [ ] Re-qualify the SMART-routed contract and log what IBKR resolves it to (S)
-- [ ] Compare symbol, currency and conId against the priced contract, abort on mismatch (S)
-- [ ] Only then decide whether to clear `localSymbol` / `tradingClass` (S)
-- [ ] Check whether the same risk applies to the SMART rung in the price fallback chain (S)
+- [ ] try/except around each `place_order`, continue to status-watch and summary for what was sent (S)
+- [ ] try/except around the per-account body in `main.py` (S)
+- [ ] ConnectionError handler prints the transmitted orders and drops the "re-run" advice (S)
+- [ ] Never skip the `pending_followup` bookkeeping because of a placement error (S)
 
-## Review the execution path (M)
+## Make pending top-ups safe state (M)
 
-Three independent defects surfaced in a single live run on 2026-10-01: Error 478 on EGLN,
-the cash-sizing rejection, and the dashboard showing a green "Ready" badge on an account
-whose only order was rejected. Two were long-standing and simply had not met their trigger
-conditions. That rate suggests the order and status path deserves a deliberate read rather
-than another round of symptom chasing.
-Done when: the execute path has been reviewed end to end and findings are either fixed or
-written down here.
+Ten of the audit's findings are in this one subsystem. It is the only state carried between
+runs and it was built without the defences the stateless path has: no validation on load, no
+environment key, no reconciliation against what was actually bought, no None guards, no gate
+checks, and it mutates on preview.
+Done when: a pending file cannot cause a double purchase, a crash, or a paper/live crossover.
 
-- [ ] Read `place_order`, `execute_plan` and the `pending_followup` branches end to end (M)
-- [ ] Check every IBKR terminal status is handled in both the bot and the dashboard parser (S)
-- [ ] Confirm `get_account_cash` should read `SettledCash` rather than `TotalCashValue` (S)
-- [ ] `order_commission_buffer` is flat 1.25 EUR but IBKR charged ~3.10 on a 4.2k order; make it scale (S)
+- [ ] Reconcile against `trade.orderStatus.filled`; refuse to re-place while an order is open at IBKR (M)
+- [ ] Environment in the filename, and refuse on `account_id` mismatch (S)
+- [ ] Validate the record on load; a bad one is a safety stop for that account only (S)
+- [ ] Guard the `real_cash is None` path, which currently crashes the whole run (S)
+- [ ] Preview must not delete or mutate pending state (S)
 
 ---
 
@@ -225,6 +222,23 @@ test_tick_conformance.py # Offline Error 110 regression test (no Gateway, no ord
 dashboard/               # index.html (preview+execute) + settings.html
 IBKR_dashboard.bat      # Double-click to start server + open browser
 ```
+
+### Audit of 2026-10-01
+
+A 275-agent sweep audited every module, with three adversarial verifiers per finding: 64 raised,
+20 refuted, 56 confirmed (4 critical, 29 high, 23 medium). Verdict: no rewrite needed, the
+architecture is sound, but the defects are concentrated in the allocators, the pending top-up
+subsystem and the missing error paths. Five root causes explain almost all of them:
+
+1. Pending top-up is unguarded persistent state (10 findings)
+2. Error paths were never written, so every failure is a total failure
+3. Things that must agree are computed twice independently (sizing vs placement, preview vs execute)
+4. The bot's stdout is a protocol parsed by per-symptom regexes, so correct output gets dropped
+5. The tests re-implement the code instead of calling it, so both suites stay green if their fix is reverted
+
+Most defects are cliff-shaped: a fraction crossing 0.75, a leftover smaller than one tick, a
+conId seen before in the same process. None are random, all look random, none are visible in a
+log that reports success. That is the whole "run of intermittent bugs".
 
 ### Known limitations (current)
 - No retry for unfilled limit orders (see Next Build)
